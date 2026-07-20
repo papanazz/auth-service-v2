@@ -79,7 +79,7 @@ services:
       - "9000:9000"
     container_name: bayu.auth.http
     environment:
-      APP_NAME: auth-service
+      APP_NAME: auth-service-v2
       APP_ENV: local
       HTTP_PORT: 9000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth_system?sslmode=disable

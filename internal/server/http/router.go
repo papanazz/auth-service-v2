@@ -2,12 +2,14 @@ package http
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/papanazz/auth-service-v2/internal/app"
 	"github.com/papanazz/auth-service-v2/internal/health"
+	"github.com/papanazz/auth-service-v2/internal/server/http/handler"
 	"github.com/papanazz/auth-service-v2/internal/server/http/middleware"
 )
 
@@ -19,8 +21,9 @@ func NewRouter(
 
 	r.Use(
 		middleware.Recovery,
+		middleware.Timeout(5*time.Second),
 		middleware.RequestID,
-		middleware.Tracer("auth-service"),
+		middleware.Tracer(application.Config.AppName),
 		middleware.Metrics(application.Metrics),
 		middleware.Logger(application.Logger),
 	)
@@ -36,6 +39,15 @@ func NewRouter(
 	r.Get(
 		"/health",
 		healthHandler.Health,
+	)
+
+	authHandler := handler.NewAuthHandler(
+		application.RegisterService,
+	)
+
+	r.Post(
+		"/v1/auth/register",
+		authHandler.Register,
 	)
 
 	return r

@@ -9,7 +9,7 @@ import (
 )
 
 type Config struct {
-	AppName  string `env:"APP_NAME" envDefault:"auth-service"`
+	AppName  string `env:"APP_NAME" envDefault:"auth-service-v2"`
 	AppEnv   string `env:"APP_ENV" envDefault:"development"`
 	LogLevel string `env:"LOG_LEVEL" envDefault:"debug"`
 
