@@ -1,0 +1,128 @@
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: bayu.auth.postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: auth_system
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d auth_system" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    container_name: bayu.auth.dbmigration
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations
+    command: [ "-path", "/migrations", "-database", "postgres://postgres:postgres@postgres:5432/auth_system?sslmode=disable", "up" ]
+
+  redis:
+    image: redis:alpine
+    container_name: bayu.auth.redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: bayu.auth.grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.74.0
+    container_name: bayu.auth.jaeger
+    ports:
+      - "16686:16686"
+      # OTLP gRPC
+      - "4317:4317"
+      # OTLP HTTP
+      - "4318:4318"
+
+  adminer:
+    image: adminer:5.4.2
+    container_name: bayu.auth.adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/dockerfile
+    ports:
+      - "9000:9000"
+    container_name: bayu.auth.http
+    environment:
+      APP_NAME: auth-service
+      APP_ENV: local
+      HTTP_PORT: 9000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth_system?sslmode=disable
+      DATABASE_MAX_CONNECTIONS: 20
+      DATABASE_MIN_CONNECTIONS: 5
+      DATABASE_MAX_CONNECTION_LIFETIME: 30m
+      DATABASE_MAX_CONNECTION_IDLE_TIME: 5m
+      DATABASE_HEALTH_CHECK_PERIOD: 1m
+      REDIS_ADDRESS: redis:6379
+      REDIS_POOL_SIZE: 20
+      REDIS_MIN_IDLE_CONNECTIONS: 5
+      REDIS_DIAL_TIMEOUT: 5s
+      REDIS_READ_TIMEOUT: 3s
+      REDIS_WRITE_TIMEOUT: 3s
+      REDIS_POOL_TIMEOUT: 4s
+      REDIS_IDLE_TIMEOUT: 5m
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: bayu.auth.prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  grafana_data:
