@@ -53,7 +53,7 @@ func (h *RegisterService) Handle(
 		return nil, errs.ErrUserAlreadyExists
 
 	case errors.Is(err, errs.ErrUserNotFound):
-		// continue
+		break
 
 	default:
 		return nil, err

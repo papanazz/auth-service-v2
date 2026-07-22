@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: auth_system
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -88,6 +88,7 @@ services:
       DATABASE_MAX_CONNECTION_LIFETIME: 30m
       DATABASE_MAX_CONNECTION_IDLE_TIME: 5m
       DATABASE_HEALTH_CHECK_PERIOD: 1m
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
       REDIS_ADDRESS: redis:6379
       REDIS_POOL_SIZE: 20
       REDIS_MIN_IDLE_CONNECTIONS: 5
@@ -96,7 +97,9 @@ services:
       REDIS_WRITE_TIMEOUT: 3s
       REDIS_POOL_TIMEOUT: 4s
       REDIS_IDLE_TIMEOUT: 5m
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      TOKEN_SECRET: lMQvPqbGocV4Y5u0RwRrB9H
+      TOKEN_TTL_IN_SECONDS: 3600
+      TOKEN_REFRESH_IN_SECONDS: 86400
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]
       interval: 5s

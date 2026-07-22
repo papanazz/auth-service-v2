@@ -4,54 +4,77 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/papanazz/auth-service-v2/internal/app/user/register"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
+	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/server/http/response"
 )
 
 type AuthHandler struct {
-	register *register.RegisterService
+	logger *logger.Logger
+	login  *login.LoginService
 }
 
 func NewAuthHandler(
-	register *register.RegisterService,
+	logger *logger.Logger,
+	login *login.LoginService,
 ) *AuthHandler {
 	return &AuthHandler{
-		register: register,
+		logger: logger,
+		login:  login,
 	}
 }
 
-func (h *AuthHandler) Register(
+func (h *AuthHandler) Login(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-
+	ctx := r.Context()
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		DeviceID   string `json:"device_id"`
+		DeviceName string `json:"device_name"`
+		DeviceType string `json:"device_type"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, errs.ErrInvalidRequest)
+	if err := json.NewDecoder(
+		r.Body,
+	).
+		Decode(&req); err != nil {
+		h.logger.Error(ctx, "[Login] Invalid Params", err, nil)
+
+		response.WriteError(
+			w,
+			errs.ErrInvalidRequest,
+		)
+
 		return
 	}
 
-	res, err := h.register.Handle(
-		r.Context(),
-		register.Command{
-			Email:    req.Email,
-			Password: req.Password,
-		},
-	)
+	result, err :=
+		h.login.Handle(
+			r.Context(),
+			login.Command{
+				Email:      req.Email,
+				Password:   req.Password,
+				DeviceID:   req.DeviceID,
+				DeviceName: req.DeviceName,
+				DeviceType: req.DeviceType,
+				IPAddress:  r.RemoteAddr,
+				UserAgent:  r.UserAgent(),
+			},
+		)
 
 	if err != nil {
+		h.logger.Error(ctx, "[Login] Got error from service", err, nil)
 		response.WriteError(w, err)
 		return
 	}
 
 	response.WriteJSON(
 		w,
-		http.StatusCreated,
-		res,
+		http.StatusOK,
+		result,
 	)
 }

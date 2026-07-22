@@ -15,11 +15,11 @@ import (
 type DeviceType string
 
 const (
-	DeviceTypeWEB           DeviceType = "WEB"
-	DeviceTypeMOBILEIOS     DeviceType = "MOBILE_IOS"
-	DeviceTypeMOBILEANDROID DeviceType = "MOBILE_ANDROID"
-	DeviceTypeDESKTOP       DeviceType = "DESKTOP"
-	DeviceTypeSERVICE       DeviceType = "SERVICE"
+	DeviceTypeWEB     DeviceType = "WEB"
+	DeviceTypeIOS     DeviceType = "IOS"
+	DeviceTypeANDROID DeviceType = "ANDROID"
+	DeviceTypeDESKTOP DeviceType = "DESKTOP"
+	DeviceTypeSERVICE DeviceType = "SERVICE"
 )
 
 func (e *DeviceType) Scan(src interface{}) error {
@@ -99,6 +99,30 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.UserStatus), nil
+}
+
+type RefreshToken struct {
+	ID        uuid.UUID  `json:"id"`
+	SessionID uuid.UUID  `json:"session_id"`
+	TokenHash string     `json:"token_hash"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type Session struct {
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	DeviceID   string     `json:"device_id"`
+	DeviceName string     `json:"device_name"`
+	DeviceType DeviceType `json:"device_type"`
+	UserAgent  string     `json:"user_agent"`
+	IpAddress  string     `json:"ip_address"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type User struct {

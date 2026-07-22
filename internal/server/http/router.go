@@ -41,13 +41,18 @@ func NewRouter(
 		healthHandler.Health,
 	)
 
-	authHandler := handler.NewAuthHandler(
-		application.RegisterService,
-	)
+	userHandler := handler.NewUserHandler(application.Logger, application.RegisterService)
 
 	r.Post(
-		"/v1/auth/register",
-		authHandler.Register,
+		"/v1/user/register",
+		userHandler.Register,
+	)
+
+	authHandler := handler.NewAuthHandler(application.Logger, application.LoginService)
+
+	r.Post(
+		"/v1/auth/login",
+		authHandler.Login,
 	)
 
 	return r

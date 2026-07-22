@@ -27,9 +27,9 @@ CREATE TYPE device_type AS ENUM (
 
     'WEB',
 
-    'MOBILE_IOS',
+    'IOS',
 
-    'MOBILE_ANDROID',
+    'ANDROID',
 
     'DESKTOP',
 

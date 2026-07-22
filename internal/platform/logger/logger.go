@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type Logger struct {
@@ -17,9 +18,15 @@ func New(env string) (*Logger, error) {
 	)
 
 	if env == "local" {
-		logger, err = zap.NewDevelopment()
+		logger, err = zap.NewDevelopment(
+			zap.AddCallerSkip(1),
+			zap.AddStacktrace(zapcore.FatalLevel+1),
+		)
 	} else {
-		logger, err = zap.NewProduction()
+		logger, err = zap.NewProduction(
+			zap.AddCallerSkip(1),
+			zap.AddStacktrace(zapcore.FatalLevel+1),
+		)
 	}
 
 	return &Logger{

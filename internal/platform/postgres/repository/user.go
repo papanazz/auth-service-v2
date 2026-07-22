@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
+	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 	"github.com/papanazz/auth-service-v2/internal/platform/postgres/sqlc"
 )
 
@@ -59,7 +62,9 @@ func (r *UserRepository) FindByEmail(
 		)
 
 	if err != nil {
-
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errs.ErrUserNotFound
+		}
 		return nil, err
 
 	}

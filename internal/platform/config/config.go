@@ -17,6 +17,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Redis         RedisConfig
 	Observability ObservabilityConfig
+	Token         TokenConfig
 }
 
 type HTTPConfig struct {
@@ -48,6 +49,12 @@ type RedisConfig struct {
 	WriteTimeout       time.Duration `env:"REDIS_WRITE_TIMEOUT" envDefault:"3s"`
 	PoolTimeout        time.Duration `env:"REDIS_POOL_TIMEOUT" envDefault:"4s"`
 	IdleTimeout        time.Duration `env:"REDIS_IDLE_TIMEOUT" envDefault:"5m"`
+}
+
+type TokenConfig struct {
+	SecretKey             string `env:"TOKEN_SECRET_KEY"`
+	TokenTTLInSeconds     int    `env:"TOKEN_TTL_IN_SECONDS"`
+	TokenRefreshInSeconds int    `env:"TOKEN_REFRESH_IN_SECONDS"`
 }
 
 func Load() (*Config, error) {
