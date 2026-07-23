@@ -40,4 +40,9 @@ var (
 		CodeAccountLocked,
 		"account is locked",
 	)
+
+	ErrTooManyRequests = New(
+		CodeTooManyRequest,
+		"too many requests",
+	)
 )

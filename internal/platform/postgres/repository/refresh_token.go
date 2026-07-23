@@ -10,12 +10,12 @@ import (
 )
 
 type RefreshTokenRepository struct {
-	tokenTTL int
+	tokenTTL time.Duration
 	query    *sqlc.Queries
 }
 
 func NewRefreshTokenRepository(
-	tokenTTL int,
+	tokenTTL time.Duration,
 	query *sqlc.Queries,
 ) *RefreshTokenRepository {
 
@@ -23,6 +23,17 @@ func NewRefreshTokenRepository(
 		tokenTTL: tokenTTL,
 		query:    query,
 	}
+}
+
+func (r *RefreshTokenRepository) WithTx(
+	tx sqlc.DBTX,
+) refresh_token.Repository {
+
+	return &RefreshTokenRepository{
+		tokenTTL: r.tokenTTL,
+		query:    sqlc.New(tx),
+	}
+
 }
 
 func (r *RefreshTokenRepository) Create(
@@ -37,7 +48,7 @@ func (r *RefreshTokenRepository) Create(
 				ID:        t.ID,
 				SessionID: t.SessionID,
 				TokenHash: t.Hash,
-				ExpiresAt: time.Now().Add(time.Duration(r.tokenTTL) * time.Second),
+				ExpiresAt: time.Now().Add(r.tokenTTL),
 			},
 		)
 

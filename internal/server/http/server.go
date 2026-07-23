@@ -20,7 +20,7 @@ func NewServer(a *app.Application) *Server {
 	return &Server{
 		logger: a.Logger,
 		server: &http.Server{
-			Addr:         fmt.Sprintf(":%d", a.Config.HTTP.Port),
+			Addr:         fmt.Sprintf(":%d", a.Config.Server.HTTP.Port),
 			Handler:      NewRouter(a),
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,

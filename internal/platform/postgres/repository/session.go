@@ -48,3 +48,14 @@ func (r *SessionRepository) Create(
 
 	return err
 }
+
+func (r *SessionRepository) WithTx(
+	tx sqlc.DBTX,
+) session.Repository {
+
+	return &SessionRepository{
+
+		query: sqlc.New(tx),
+	}
+
+}

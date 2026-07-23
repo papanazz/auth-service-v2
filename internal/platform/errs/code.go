@@ -20,4 +20,6 @@ const (
 	CodeEmailNotVerified Code = "EMAIL_NOT_VERIFIED"
 
 	CodeAccountLocked Code = "ACCOUNT_LOCKED"
+
+	CodeTooManyRequest Code = "TOO_MANY_REQUEST"
 )

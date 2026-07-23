@@ -23,7 +23,7 @@ func NewRouter(
 		middleware.Recovery,
 		middleware.Timeout(5*time.Second),
 		middleware.RequestID,
-		middleware.Tracer(application.Config.AppName),
+		middleware.Tracer(application.Config.App.Name),
 		middleware.Metrics(application.Metrics),
 		middleware.Logger(application.Logger),
 	)

@@ -101,6 +101,19 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 	return string(ns.UserStatus), nil
 }
 
+type AuthenticationEvent struct {
+	ID            uuid.UUID `json:"id"`
+	EventType     string    `json:"event_type"`
+	UserID        uuid.UUID `json:"user_id"`
+	Email         string    `json:"email"`
+	IpAddress     string    `json:"ip_address"`
+	UserAgent     string    `json:"user_agent"`
+	Success       bool      `json:"success"`
+	FailureReason string    `json:"failure_reason"`
+	Metadata      []byte    `json:"metadata"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID  `json:"id"`
 	SessionID uuid.UUID  `json:"session_id"`

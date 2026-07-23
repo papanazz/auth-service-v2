@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/argon2"
+
+	domain "github.com/papanazz/auth-service-v2/internal/domain/password"
 )
 
 type Argon2id struct {
@@ -167,9 +169,7 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
-		return errors.New(
-			"invalid hash",
-		)
+		return domain.ErrInvalidHash
 	}
 
 	actualHash :=
@@ -193,9 +193,7 @@ func (a *Argon2id) Compare(
 		expectedHash,
 	) != 1 {
 
-		return errors.New(
-			"invalid password",
-		)
+		return domain.ErrInvalidPassword
 	}
 
 	return nil

@@ -39,6 +39,10 @@ func WriteError(
 			errs.CodeAccountLocked:
 
 			status = http.StatusForbidden
+
+		case errs.CodeTooManyRequest:
+
+			status = http.StatusTooManyRequests
 		}
 
 		w.Header().Set(

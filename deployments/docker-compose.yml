@@ -81,6 +81,7 @@ services:
     environment:
       APP_NAME: auth-service-v2
       APP_ENV: local
+      LOG_LEVEL: debug
       HTTP_PORT: 9000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/auth_system?sslmode=disable
       DATABASE_MAX_CONNECTIONS: 20
@@ -97,9 +98,13 @@ services:
       REDIS_WRITE_TIMEOUT: 3s
       REDIS_POOL_TIMEOUT: 4s
       REDIS_IDLE_TIMEOUT: 5m
-      TOKEN_SECRET: lMQvPqbGocV4Y5u0RwRrB9H
-      TOKEN_TTL_IN_SECONDS: 3600
-      TOKEN_REFRESH_IN_SECONDS: 86400
+      JWT_SECRET_KEY: lMQvPqbGocV4Y5u0RwRrB9H
+      JWT_TTL: 15m
+      REFRESH_TOKEN_TTL: 24h
+      LOGIN_IP_LIMIT: 20
+      LOGIN_IP_WINDOW: 1m
+      LOGIN_EMAIL_LIMIT: 5
+      LOGIN_EMAIL_WINDOW: 15m
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]
       interval: 5s

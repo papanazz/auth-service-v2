@@ -29,7 +29,7 @@ func Init(ctx context.Context, cfg *config.Config) (func(context.Context) error,
 			ctx,
 			resource.WithAttributes(
 				semconv.ServiceName(
-					cfg.AppName,
+					cfg.App.Name,
 				),
 			),
 		)
