@@ -7,9 +7,11 @@ package sqlc
 import (
 	"database/sql/driver"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type DeviceType string
@@ -57,6 +59,50 @@ func (ns NullDeviceType) Value() (driver.Value, error) {
 	return string(ns.DeviceType), nil
 }
 
+type RefreshTokenRevokeReason string
+
+const (
+	RefreshTokenRevokeReasonLOGOUT         RefreshTokenRevokeReason = "LOGOUT"
+	RefreshTokenRevokeReasonREPLAYDETECTED RefreshTokenRevokeReason = "REPLAY_DETECTED"
+	RefreshTokenRevokeReasonSECURITYPOLICY RefreshTokenRevokeReason = "SECURITY_POLICY"
+	RefreshTokenRevokeReasonEXPIRED        RefreshTokenRevokeReason = "EXPIRED"
+)
+
+func (e *RefreshTokenRevokeReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RefreshTokenRevokeReason(s)
+	case string:
+		*e = RefreshTokenRevokeReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RefreshTokenRevokeReason: %T", src)
+	}
+	return nil
+}
+
+type NullRefreshTokenRevokeReason struct {
+	RefreshTokenRevokeReason RefreshTokenRevokeReason `json:"refresh_token_revoke_reason"`
+	Valid                    bool                     `json:"valid"` // Valid is true if RefreshTokenRevokeReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRefreshTokenRevokeReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.RefreshTokenRevokeReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RefreshTokenRevokeReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRefreshTokenRevokeReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RefreshTokenRevokeReason), nil
+}
+
 type UserStatus string
 
 const (
@@ -102,40 +148,46 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 }
 
 type AuthenticationEvent struct {
-	ID            uuid.UUID `json:"id"`
-	EventType     string    `json:"event_type"`
-	UserID        uuid.UUID `json:"user_id"`
-	Email         string    `json:"email"`
-	IpAddress     string    `json:"ip_address"`
-	UserAgent     string    `json:"user_agent"`
-	Success       bool      `json:"success"`
-	FailureReason string    `json:"failure_reason"`
-	Metadata      []byte    `json:"metadata"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID        uuid.UUID          `json:"id"`
+	Type      string             `json:"type"`
+	UserID    *uuid.UUID         `json:"user_id"`
+	Email     *string            `json:"email"`
+	IpAddress *netip.Addr        `json:"ip_address"`
+	UserAgent pgtype.Text        `json:"user_agent"`
+	Success   bool               `json:"success"`
+	Reason    *string            `json:"reason"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type RefreshToken struct {
-	ID        uuid.UUID  `json:"id"`
-	SessionID uuid.UUID  `json:"session_id"`
-	TokenHash string     `json:"token_hash"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	UsedAt    *time.Time `json:"used_at"`
-	RevokedAt *time.Time `json:"revoked_at"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID            uuid.UUID                    `json:"id"`
+	SessionID     uuid.UUID                    `json:"session_id"`
+	FamilyID      uuid.UUID                    `json:"family_id"`
+	ParentTokenID *uuid.UUID                   `json:"parent_token_id"`
+	TokenHash     string                       `json:"token_hash"`
+	ExpiresAt     pgtype.Timestamptz           `json:"expires_at"`
+	ConsumedAt    pgtype.Timestamptz           `json:"consumed_at"`
+	RevokedAt     pgtype.Timestamptz           `json:"revoked_at"`
+	RevokedReason NullRefreshTokenRevokeReason `json:"revoked_reason"`
+	CreatedAt     pgtype.Timestamptz           `json:"created_at"`
 }
 
 type Session struct {
-	ID         uuid.UUID  `json:"id"`
-	UserID     uuid.UUID  `json:"user_id"`
-	DeviceID   string     `json:"device_id"`
-	DeviceName string     `json:"device_name"`
-	DeviceType DeviceType `json:"device_type"`
-	UserAgent  string     `json:"user_agent"`
-	IpAddress  string     `json:"ip_address"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	DeviceID        string             `json:"device_id"`
+	DeviceName      *string            `json:"device_name"`
+	DeviceType      DeviceType         `json:"device_type"`
+	UserAgent       pgtype.Text        `json:"user_agent"`
+	IpAddress       *netip.Addr        `json:"ip_address"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+	LastRefreshedAt pgtype.Timestamptz `json:"last_refreshed_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	RevokedReason   *string            `json:"revoked_reason"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

@@ -7,7 +7,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
-	"github.com/papanazz/auth-service-v2/internal/server/http/response"
+	"github.com/papanazz/auth-service-v2/internal/transport/http/response"
 )
 
 type UserHandler struct {

@@ -2,21 +2,25 @@
 -- Table: authentication_events
 --
 -- Definition:
--- Immutable authentication activity stream.
+-- Immutable audit trail for authentication activities.
 --
--- Use Cases:
--- - Security auditing
--- - Brute-force detection
--- - Account investigation
--- - Authentication analytics
+-- Purpose:
+-- - Security monitoring
+-- - Fraud detection
+-- - Incident investigation
+-- - Compliance reporting
+--
+-- Note:
+-- This table is append-only.
+-- Events should never be updated or deleted.
 --
 -- Examples:
 --
 -- LOGIN_SUCCESS
 -- LOGIN_FAILED
 -- LOGOUT
--- TOKEN_REFRESHED
--- SESSION_REVOKED
+-- REFRESH_TOKEN_ROTATED
+-- REFRESH_TOKEN_REPLAY_DETECTED
 --
 -- =====================================================
 
@@ -26,41 +30,105 @@ CREATE TABLE authentication_events (
     id UUID PRIMARY KEY
         DEFAULT uuid_generate_v4(),
 
-    event_type VARCHAR(100) NOT NULL
-        CHECK (
-            length(event_type) > 0
-        ),
 
+    -- Event name.
+    --
+    -- Example:
+    -- LOGIN_SUCCESS
+    -- LOGIN_FAILED
+    --
+    type VARCHAR(100) NOT NULL,
+
+
+    -- User identity.
+    --
+    -- Nullable because failed authentication
+    -- may happen before user resolution.
+    --
     user_id UUID,
 
-    -- Used when authentication fails before
-    -- user identification.
+
+    -- Input identifier.
+    --
+    -- Example:
+    -- email used during login
+    --
     email VARCHAR(255),
 
-    ip_address VARCHAR(255),
 
-    user_agent VARCHAR(255),
+    -- Client network information.
+    --
+    ip_address INET,
 
+
+    -- Client information.
+    --
+    -- Browser/app information.
+    --
+    user_agent TEXT,
+
+
+    -- Authentication result.
+    --
     success BOOLEAN NOT NULL,
 
-    failure_reason VARCHAR(100),
 
+    -- Failure explanation.
+    --
+    -- Example:
+    -- INVALID_PASSWORD
+    -- USER_NOT_FOUND
+    --
+    reason VARCHAR(255),
+
+
+    -- Additional event data.
+    --
+    -- Example:
+    --
+    -- {
+    --    "device_id": "...",
+    --    "token_family": "..."
+    -- }
+    --
     metadata JSONB,
 
-    created_at TIMESTAMP NOT NULL
-        DEFAULT NOW()
+
+    created_at TIMESTAMPTZ NOT NULL
+        DEFAULT NOW(),
+
+
+
+    CONSTRAINT fk_auth_events_user
+
+        FOREIGN KEY(user_id)
+
+        REFERENCES users(id)
+
+        ON DELETE SET NULL
 
 );
 
-CREATE INDEX idx_auth_events_user_created
-ON authentication_events(user_id, created_at DESC);
 
-CREATE INDEX idx_auth_events_email_created
-ON authentication_events(email, created_at DESC);
 
-CREATE INDEX idx_auth_events_failed_email
-ON authentication_events(email, created_at DESC)
-WHERE success = FALSE;
+CREATE INDEX idx_auth_events_user_id
 
-CREATE INDEX idx_auth_events_ip_created
-ON authentication_events(ip_address, created_at DESC);
+ON authentication_events(user_id);
+
+
+
+CREATE INDEX idx_auth_events_type
+
+ON authentication_events(type);
+
+
+
+CREATE INDEX idx_auth_events_created_at
+
+ON authentication_events(created_at);
+
+
+
+CREATE INDEX idx_auth_events_email
+
+ON authentication_events(email);

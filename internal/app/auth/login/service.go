@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/papanazz/auth-service-v2/internal/app/transaction"
+	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
+	"github.com/papanazz/auth-service-v2/internal/platform/errs"
+
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
@@ -15,38 +18,54 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/domain/session"
 	"github.com/papanazz/auth-service-v2/internal/domain/token"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
-	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
-	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
 
 type Command struct {
-	Email      string
-	Password   string
-	DeviceID   string
+	Email string
+
+	Password string
+
+	DeviceID string
+
 	DeviceName string
-	DeviceType string
-	IPAddress  string
-	UserAgent  string
+
+	DeviceType session.DeviceType
+
+	IPAddress string
+
+	UserAgent string
 }
 
 type Result struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken string `json:"access_token"`
+
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
+
+	ExpiresIn int64 `json:"expires_in"`
 }
 
 type LoginService struct {
-	transaction      transaction.Manager
-	users            user.Repository
-	sessions         session.Repository
-	refreshTokens    refresh_token.Repository
-	passwords        password.Repository
-	audit            audit.Repository
-	accessTokens     token.AccessTokenService
-	refreshGenerator token.RefreshTokenGenerator
-	hasher           token.Hasher
-	attemptTracker   auth.AttemptTracker
-	policy           SecurityPolicy
+	transaction transaction.Manager
+
+	users user.Repository
+
+	sessions session.Repository
+
+	refreshTokens refresh_token.Repository
+
+	passwords password.Verifier
+
+	accessTokens token.AccessTokenService
+
+	refreshGenerator refresh_token.Generator
+
+	refreshHasher refresh_token.Hasher
+
+	audit audit.Publisher
+
+	attemptTracker auth.AttemptTracker
+
+	policy SecurityPolicy
 }
 
 func NewService(
@@ -54,65 +73,73 @@ func NewService(
 	users user.Repository,
 	sessions session.Repository,
 	refreshTokens refresh_token.Repository,
-	passwords password.Repository,
-	audit audit.Repository,
+	passwords password.Verifier,
 	accessTokens token.AccessTokenService,
-	refreshGenerator token.RefreshTokenGenerator,
-	hasher token.Hasher,
+	refreshGenerator refresh_token.Generator,
+	refreshHasher refresh_token.Hasher,
+	audit audit.Publisher,
 	attemptTracker auth.AttemptTracker,
 	policy SecurityPolicy,
 ) *LoginService {
+
 	return &LoginService{
-		transaction:      transaction,
-		users:            users,
-		sessions:         sessions,
-		refreshTokens:    refreshTokens,
-		passwords:        passwords,
-		audit:            audit,
-		accessTokens:     accessTokens,
+
+		transaction: transaction,
+
+		users: users,
+
+		sessions: sessions,
+
+		refreshTokens: refreshTokens,
+
+		passwords: passwords,
+
+		accessTokens: accessTokens,
+
 		refreshGenerator: refreshGenerator,
-		hasher:           hasher,
-		attemptTracker:   attemptTracker,
-		policy:           policy,
+
+		refreshHasher: refreshHasher,
+
+		audit: audit,
+
+		attemptTracker: attemptTracker,
+
+		policy: policy,
 	}
 }
 
-func (h *LoginService) Handle(
+func (s *LoginService) Handle(
 	ctx context.Context,
 	cmd Command,
 ) (*Result, error) {
 
-	// Normalize email
+	email :=
+		strings.ToLower(
+			strings.TrimSpace(
+				cmd.Email,
+			),
+		)
 
-	email := strings.ToLower(
-		strings.TrimSpace(cmd.Email),
-	)
+	if err :=
+		Validate(
+			email,
+			cmd.Password,
+		); err != nil {
 
-	// Check IP rate
+		return nil, err
+	}
+
+	//
+	// 1. Rate limit check
+	//
 
 	allowed, err :=
-		h.attemptTracker.Check(
+		s.attemptTracker.Check(
 			ctx,
 			authattempt.LoginIP(
 				cmd.IPAddress,
 			),
-			h.policy.IP,
-		)
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Check Credential rate
-
-	allowed, err =
-		h.attemptTracker.Check(
-			ctx,
-			authattempt.LoginCredential(
-				cmd.Email,
-				cmd.IPAddress,
-			),
-			h.policy.Credential,
+			s.policy.IP,
 		)
 
 	if err != nil {
@@ -120,108 +147,162 @@ func (h *LoginService) Handle(
 	}
 
 	if !allowed {
-		return nil, errs.ErrTooManyRequests
+
+		return nil,
+			errs.ErrTooManyRequests
 	}
 
-	// Find user
-
-	account, err :=
-		h.users.FindByEmail(
-			ctx,
-			email,
-		)
-
-	if err != nil {
-
-		_ = h.attemptTracker.RecordFailure(
+	allowed, err =
+		s.attemptTracker.Check(
 			ctx,
 			authattempt.LoginCredential(
 				email,
 				cmd.IPAddress,
 			),
-			h.policy.Credential,
+			s.policy.Credential,
 		)
-
-		_ = h.audit.Record(
-			ctx,
-			loginFailedEvent(
-				nil,
-				email,
-				cmd.IPAddress,
-				cmd.UserAgent,
-				errs.ErrInvalidCredentials.Message,
-			),
-		)
-
-		return nil,
-			errs.ErrInvalidCredentials
-	}
-
-	// Verify password
-
-	err =
-		h.passwords.Compare(
-			account.PasswordHash,
-			cmd.Password,
-		)
-
-	if err != nil {
-
-		_ = h.attemptTracker.RecordFailure(
-			ctx,
-			authattempt.LoginCredential(
-				email,
-				cmd.IPAddress,
-			),
-			h.policy.Credential,
-		)
-
-		_ = h.audit.Record(
-			ctx,
-			loginFailedEvent(
-				&account.ID,
-				email,
-				cmd.IPAddress,
-				cmd.UserAgent,
-				errs.ErrInvalidCredentials.Message,
-			),
-		)
-
-		return nil,
-			errs.ErrInvalidCredentials
-	}
-
-	// Authentication success
-	// Clear failed attempt counter
-
-	_ = h.attemptTracker.Reset(
-		ctx,
-		authattempt.LoginCredential(
-			email,
-			cmd.IPAddress,
-		),
-	)
-
-	// Generate refresh token
-	// No database involved
-
-	refreshToken, err :=
-		h.refreshGenerator.Generate()
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Database transaction
+	if !allowed {
+
+		return nil,
+			errs.ErrTooManyRequests
+	}
+
+	//
+	// 2. Find account
+	//
+
+	account, err :=
+		s.users.FindByEmail(
+			ctx,
+			email,
+		)
+
+	if err != nil {
+
+		//
+		// Important:
+		// Run dummy Argon2 verification
+		// to prevent user enumeration
+		//
+
+		_ =
+			s.passwords.Verify(
+				dummyPasswordHash,
+				cmd.Password,
+			)
+
+		s.recordFailure(
+			ctx,
+			nil,
+			email,
+			cmd,
+			errs.ErrInvalidCredentials.Message,
+		)
+
+		return nil,
+			errs.ErrInvalidCredentials
+	}
+
+	//
+	// 3. Verify password
+	//
+
+	if err :=
+		s.passwords.Verify(
+			account.PasswordHash,
+			cmd.Password,
+		); err != nil {
+
+		_ =
+			s.attemptTracker.RecordFailure(
+				ctx,
+				authattempt.LoginCredential(
+					email,
+					cmd.IPAddress,
+				),
+				s.policy.Credential,
+			)
+
+		s.recordFailure(
+			ctx,
+			&account.ID,
+			email,
+			cmd,
+			errs.ErrInvalidCredentials.Message,
+		)
+
+		return nil,
+			errs.ErrInvalidCredentials
+	}
+
+	//
+	// 4. Authentication success
+	//
+
+	_ =
+		s.attemptTracker.Reset(
+			ctx,
+			authattempt.LoginCredential(
+				email,
+				cmd.IPAddress,
+			),
+		)
+
+	sessionID :=
+		uuid.New()
+
+	familyID :=
+		uuid.New()
+
+	//
+	// Generate refresh token
+	//
+
+	rawRefreshToken, err :=
+		s.refreshGenerator.Generate()
+
+	if err != nil {
+
+		return nil, err
+	}
+
+	//
+	// Generate access token
+	//
+	// No database dependency
+	//
+
+	accessToken, err :=
+		s.accessTokens.Generate(
+			token.Claims{
+
+				UserID: account.ID,
+
+				SessionID: sessionID,
+			},
+		)
+
+	if err != nil {
+
+		return nil, err
+	}
+
+	//
+	// 5. Persist authentication state
+	//
 
 	err =
-		h.transaction.WithinTransaction(
+		s.transaction.WithinTransaction(
 			ctx,
 			func(tx pgx.Tx) error {
-				sessionID := uuid.New()
 
 				txSessionRepo :=
-					h.sessions.WithTx(
+					s.sessions.WithTx(
 						tx,
 					)
 
@@ -229,22 +310,32 @@ func (h *LoginService) Handle(
 					txSessionRepo.Create(
 						ctx,
 						session.Session{
-							ID:         sessionID,
-							UserID:     account.ID,
-							IpAddress:  cmd.IPAddress,
-							UserAgent:  cmd.UserAgent,
-							DeviceID:   cmd.DeviceID,
+
+							ID: sessionID,
+
+							UserID: account.ID,
+
+							DeviceID: cmd.DeviceID,
+
 							DeviceName: cmd.DeviceName,
-							DeviceType: session.DeviceType(cmd.DeviceType),
+
+							DeviceType: cmd.DeviceType,
+
+							IPAddress: cmd.IPAddress,
+
+							UserAgent: cmd.UserAgent,
+
+							CreatedAt: time.Now().UTC(),
 						},
 					)
 
 				if err != nil {
+
 					return err
 				}
 
 				txRefreshRepo :=
-					h.refreshTokens.WithTx(
+					s.refreshTokens.WithTx(
 						tx,
 					)
 
@@ -252,49 +343,91 @@ func (h *LoginService) Handle(
 					ctx,
 					refresh_token.Token{
 
-						ID:        uuid.New(),
+						ID: uuid.New(),
+
 						SessionID: sessionID,
-						Hash: h.hasher.Hash(
-							refreshToken,
+
+						FamilyID: familyID,
+
+						ParentTokenID: nil,
+
+						Hash: s.refreshHasher.Hash(
+							rawRefreshToken,
 						),
+
+						ExpiresAt: time.Now().
+							Add(
+								s.policy.RefreshTokenTTL,
+							).
+							UTC(),
+
+						CreatedAt: time.Now().UTC(),
 					},
 				)
 			},
 		)
 
 	if err != nil {
+
 		return nil, err
 	}
 
-	// Generate JWT
-	// No DB transaction needed
+	//
+	// 6. Publish audit event
+	//
 
-	accessToken, err :=
-		h.accessTokens.Generate(
-			token.Claims{
-
-				UserID: account.ID,
-			},
+	_ =
+		s.audit.Publish(
+			ctx,
+			loginSuccessEvent(
+				account.ID,
+				sessionID,
+				cmd.IPAddress,
+				cmd.UserAgent,
+			),
 		)
 
-	if err != nil {
-		return nil, err
-	}
-
-	// Audit success
-
-	_ = h.audit.Record(
-		ctx,
-		loginSuccessEvent(
-			account.ID,
-			cmd.IPAddress,
-			cmd.UserAgent,
-		),
-	)
-
 	return &Result{
-		AccessToken:  accessToken.Token,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int64(time.Until(accessToken.ExpiresAt).Seconds()),
+
+		AccessToken: accessToken.Token,
+
+		RefreshToken: rawRefreshToken,
+
+		ExpiresIn: int64(
+			time.Until(
+				accessToken.ExpiresAt,
+			).Seconds(),
+		),
 	}, nil
+}
+
+func (s *LoginService) recordFailure(
+	ctx context.Context,
+	userID *uuid.UUID,
+	email string,
+	cmd Command,
+	reason string,
+) {
+
+	_ =
+		s.attemptTracker.RecordFailure(
+			ctx,
+			authattempt.LoginCredential(
+				email,
+				cmd.IPAddress,
+			),
+			s.policy.Credential,
+		)
+
+	_ =
+		s.audit.Publish(
+			ctx,
+			loginFailedEvent(
+				userID,
+				email,
+				cmd.IPAddress,
+				cmd.UserAgent,
+				reason,
+			),
+		)
 }

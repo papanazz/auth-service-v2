@@ -1,27 +1,53 @@
--- name: CreateAuditLog :one
+-- =====================================================
+-- Create Authentication Event
+-- =====================================================
+
+-- name: CreateAuthenticationEvent :one
 
 INSERT INTO authentication_events
 (
     id,
-    event_type,
+
+    type,
+
     user_id,
+
     email,
+
     ip_address,
+
     user_agent,
+
     success,
-    failure_reason,
-    metadata
+
+    reason,
+
+    metadata,
+
+    created_at
 )
+
 VALUES
 (
     $1,
+
     $2,
+
     $3,
+
     $4,
+
     $5,
+
     $6,
+
     $7,
+
     $8,
-    $9
+
+    $9,
+
+    $10
 )
+
 RETURNING *;

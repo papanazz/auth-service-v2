@@ -5,20 +5,25 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type TransactionManager struct {
 	pool *pgxpool.Pool
+
+	timeout time.Duration
 }
 
 func NewTransactionManager(
 	pool *pgxpool.Pool,
+	timeout time.Duration,
 ) *TransactionManager {
 
 	return &TransactionManager{
+
 		pool: pool,
+
+		timeout: timeout,
 	}
 }
 
@@ -30,7 +35,7 @@ func (m *TransactionManager) WithinTransaction(
 	txCtx, cancel :=
 		context.WithTimeout(
 			ctx,
-			3*time.Second,
+			m.timeout,
 		)
 
 	defer cancel()
@@ -47,11 +52,24 @@ func (m *TransactionManager) WithinTransaction(
 		return err
 	}
 
+	committed := false
+
 	defer func() {
 
-		_ = tx.Rollback(
-			txCtx,
-		)
+		if !committed {
+
+			rollbackCtx, cancel :=
+				context.WithTimeout(
+					context.Background(),
+					time.Second,
+				)
+
+			defer cancel()
+
+			_ = tx.Rollback(
+				rollbackCtx,
+			)
+		}
 
 	}()
 
@@ -61,7 +79,13 @@ func (m *TransactionManager) WithinTransaction(
 		return err
 	}
 
-	return tx.Commit(
-		txCtx,
-	)
+	if err :=
+		tx.Commit(txCtx); err != nil {
+
+		return err
+	}
+
+	committed = true
+
+	return nil
 }

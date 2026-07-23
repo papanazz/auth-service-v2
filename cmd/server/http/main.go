@@ -13,7 +13,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/platform/tracing"
-	"github.com/papanazz/auth-service-v2/internal/server/http"
+	"github.com/papanazz/auth-service-v2/internal/transport/http"
 )
 
 func main() {

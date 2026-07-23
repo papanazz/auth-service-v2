@@ -7,42 +7,69 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const createUser = `-- name: CreateUser :one
 
-INSERT INTO users
-(
+
+
+INSERT INTO users (
+
     id,
+
     email,
+
     password_hash,
-    status
+
+    status,
+
+    email_verified_at
+
 )
-VALUES
-(
+
+VALUES (
+
     $1,
+
     $2,
+
     $3,
-    $4
+
+    $4,
+
+    $5
+
 )
+
 RETURNING id, email, password_hash, status, email_verified_at, last_login_at, created_at, updated_at
 `
 
 type CreateUserParams struct {
-	ID           uuid.UUID  `json:"id"`
-	Email        string     `json:"email"`
-	PasswordHash string     `json:"password_hash"`
-	Status       UserStatus `json:"status"`
+	ID              uuid.UUID  `json:"id"`
+	Email           string     `json:"email"`
+	PasswordHash    string     `json:"password_hash"`
+	Status          UserStatus `json:"status"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at"`
 }
 
+// =====================================================
+// Create User
+//
+// Creates a new identity account.
+//
+// Password is already hashed before reaching repository.
+//
+// =====================================================
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.ID,
 		arg.Email,
 		arg.PasswordHash,
 		arg.Status,
+		arg.EmailVerifiedAt,
 	)
 	var i User
 	err := row.Scan(
@@ -60,12 +87,32 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 
 const getUserByEmail = `-- name: GetUserByEmail :one
 
-SELECT id, email, password_hash, status, email_verified_at, last_login_at, created_at, updated_at
+
+
+SELECT
+
+    id, email, password_hash, status, email_verified_at, last_login_at, created_at, updated_at
+
 FROM users
-WHERE email=$1
+
+WHERE email = $1
+
 LIMIT 1
 `
 
+// =====================================================
+// Find User By Email
+//
+// Used for:
+//
+// - Login
+// - Registration duplicate check
+//
+// Email should already be normalized:
+//
+// lowercase + trimmed
+//
+// =====================================================
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
@@ -80,4 +127,77 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+
+
+
+SELECT
+
+    id, email, password_hash, status, email_verified_at, last_login_at, created_at, updated_at
+
+FROM users
+
+WHERE id = $1
+
+LIMIT 1
+`
+
+// =====================================================
+// Find User By ID
+//
+// Used for:
+//
+// - JWT validation
+// - Profile lookup
+// - Authorization
+// - Refresh token flow
+//
+// =====================================================
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Status,
+		&i.EmailVerifiedAt,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateLastLoginAt = `-- name: UpdateLastLoginAt :exec
+
+
+
+UPDATE users
+
+SET
+
+    last_login_at = NOW(),
+
+    updated_at = NOW()
+
+WHERE id = $1
+`
+
+// =====================================================
+// Update Last Login
+//
+// Used after successful authentication.
+//
+// This should NOT be in the login transaction that
+// creates session/token because it is not critical.
+//
+// Can be async later.
+//
+// =====================================================
+func (q *Queries) UpdateLastLoginAt(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, updateLastLoginAt, id)
+	return err
 }

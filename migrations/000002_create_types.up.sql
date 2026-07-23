@@ -36,3 +36,15 @@ CREATE TYPE device_type AS ENUM (
     'SERVICE'
 
 );
+
+CREATE TYPE refresh_token_revoke_reason AS ENUM (
+
+    'LOGOUT',
+
+    'REPLAY_DETECTED',
+
+    'SECURITY_POLICY',
+
+    'EXPIRED'
+
+);

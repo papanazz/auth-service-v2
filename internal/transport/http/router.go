@@ -9,8 +9,8 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/app"
 	"github.com/papanazz/auth-service-v2/internal/health"
-	"github.com/papanazz/auth-service-v2/internal/server/http/handler"
-	"github.com/papanazz/auth-service-v2/internal/server/http/middleware"
+	"github.com/papanazz/auth-service-v2/internal/transport/http/handler"
+	"github.com/papanazz/auth-service-v2/internal/transport/http/middleware"
 )
 
 func NewRouter(
@@ -53,6 +53,13 @@ func NewRouter(
 	r.Post(
 		"/v1/auth/login",
 		authHandler.Login,
+	)
+
+	refreshHandler := handler.NewRefreshHandler(application.RefreshService)
+
+	r.Post(
+		"/v1/auth/refresh",
+		refreshHandler.Handle,
 	)
 
 	return r

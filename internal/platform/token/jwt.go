@@ -27,11 +27,27 @@ func NewJWTService(
 
 		ttl: ttl,
 	}
-
 }
 
 type claims struct {
+
+	// Subject
+	//
+	// Represents authenticated user.
+	//
 	UserID string `json:"sub"`
+
+	// Authentication session identifier.
+	//
+	// Allows tracing:
+	//
+	// User
+	//   |
+	//   +-- Session
+	//          |
+	//          +-- Access Token
+	//
+	SessionID string `json:"sid"`
 
 	jwt.RegisteredClaims
 }
@@ -43,19 +59,25 @@ func (s *JWTService) Generate(
 	error,
 ) {
 
-	expiration :=
+	now :=
 		time.Now().
-			Add(
-				s.ttl,
-			)
+			UTC()
+
+	expiration :=
+		now.Add(
+			s.ttl,
+		)
 
 	token :=
 		jwt.NewWithClaims(
+
 			jwt.SigningMethodHS256,
 
 			claims{
 
 				UserID: input.UserID.String(),
+
+				SessionID: input.SessionID.String(),
 
 				RegisteredClaims: jwt.RegisteredClaims{
 
@@ -64,7 +86,11 @@ func (s *JWTService) Generate(
 					),
 
 					IssuedAt: jwt.NewNumericDate(
-						time.Now(),
+						now,
+					),
+
+					NotBefore: jwt.NewNumericDate(
+						now,
 					),
 				},
 			},
@@ -77,8 +103,8 @@ func (s *JWTService) Generate(
 
 	if err != nil {
 
-		return domainToken.AccessToken{}, err
-
+		return domainToken.AccessToken{},
+			err
 	}
 
 	return domainToken.AccessToken{

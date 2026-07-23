@@ -5,9 +5,10 @@ import (
 	"net/http"
 
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
+	"github.com/papanazz/auth-service-v2/internal/domain/session"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
-	"github.com/papanazz/auth-service-v2/internal/server/http/response"
+	"github.com/papanazz/auth-service-v2/internal/transport/http/response"
 )
 
 type AuthHandler struct {
@@ -60,7 +61,7 @@ func (h *AuthHandler) Login(
 				Password:   req.Password,
 				DeviceID:   req.DeviceID,
 				DeviceName: req.DeviceName,
-				DeviceType: req.DeviceType,
+				DeviceType: session.DeviceType(req.DeviceType),
 				IPAddress:  r.RemoteAddr,
 				UserAgent:  r.UserAgent(),
 			},

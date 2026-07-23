@@ -7,73 +7,103 @@ package sqlc
 
 import (
 	"context"
+	"net/netip"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createAuditLog = `-- name: CreateAuditLog :one
+const createAuthenticationEvent = `-- name: CreateAuthenticationEvent :one
+
 
 INSERT INTO authentication_events
 (
     id,
-    event_type,
+
+    type,
+
     user_id,
+
     email,
+
     ip_address,
+
     user_agent,
+
     success,
-    failure_reason,
-    metadata
+
+    reason,
+
+    metadata,
+
+    created_at
 )
+
 VALUES
 (
     $1,
+
     $2,
+
     $3,
+
     $4,
+
     $5,
+
     $6,
+
     $7,
+
     $8,
-    $9
+
+    $9,
+
+    $10
 )
-RETURNING id, event_type, user_id, email, ip_address, user_agent, success, failure_reason, metadata, created_at
+
+RETURNING id, type, user_id, email, ip_address, user_agent, success, reason, metadata, created_at
 `
 
-type CreateAuditLogParams struct {
-	ID            uuid.UUID `json:"id"`
-	EventType     string    `json:"event_type"`
-	UserID        uuid.UUID `json:"user_id"`
-	Email         string    `json:"email"`
-	IpAddress     string    `json:"ip_address"`
-	UserAgent     string    `json:"user_agent"`
-	Success       bool      `json:"success"`
-	FailureReason string    `json:"failure_reason"`
-	Metadata      []byte    `json:"metadata"`
+type CreateAuthenticationEventParams struct {
+	ID        uuid.UUID          `json:"id"`
+	Type      string             `json:"type"`
+	UserID    *uuid.UUID         `json:"user_id"`
+	Email     *string            `json:"email"`
+	IpAddress *netip.Addr        `json:"ip_address"`
+	UserAgent pgtype.Text        `json:"user_agent"`
+	Success   bool               `json:"success"`
+	Reason    *string            `json:"reason"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuthenticationEvent, error) {
-	row := q.db.QueryRow(ctx, createAuditLog,
+// =====================================================
+// Create Authentication Event
+// =====================================================
+func (q *Queries) CreateAuthenticationEvent(ctx context.Context, arg CreateAuthenticationEventParams) (AuthenticationEvent, error) {
+	row := q.db.QueryRow(ctx, createAuthenticationEvent,
 		arg.ID,
-		arg.EventType,
+		arg.Type,
 		arg.UserID,
 		arg.Email,
 		arg.IpAddress,
 		arg.UserAgent,
 		arg.Success,
-		arg.FailureReason,
+		arg.Reason,
 		arg.Metadata,
+		arg.CreatedAt,
 	)
 	var i AuthenticationEvent
 	err := row.Scan(
 		&i.ID,
-		&i.EventType,
+		&i.Type,
 		&i.UserID,
 		&i.Email,
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.Success,
-		&i.FailureReason,
+		&i.Reason,
 		&i.Metadata,
 		&i.CreatedAt,
 	)

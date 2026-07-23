@@ -7,45 +7,73 @@ package sqlc
 
 import (
 	"context"
+	"net/netip"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createSession = `-- name: CreateSession :one
 
-INSERT INTO sessions
-(
+
+
+INSERT INTO sessions (
+
     id,
+
     user_id,
+
     device_id,
+
     device_name,
+
     device_type,
+
     user_agent,
-    ip_address
+
+    ip_address,
+
+    last_used_at
+
 )
-VALUES
-(
+
+VALUES (
+
     $1,
+
     $2,
+
     $3,
+
     $4,
+
     $5,
+
     $6,
-    $7
+
+    $7,
+
+    $8
+
 )
-RETURNING id, user_id, device_id, device_name, device_type, user_agent, ip_address, last_used_at, revoked_at, created_at, updated_at
+
+RETURNING id, user_id, device_id, device_name, device_type, user_agent, ip_address, last_used_at, last_refreshed_at, expires_at, revoked_at, revoked_reason, created_at, updated_at
 `
 
 type CreateSessionParams struct {
-	ID         uuid.UUID  `json:"id"`
-	UserID     uuid.UUID  `json:"user_id"`
-	DeviceID   string     `json:"device_id"`
-	DeviceName string     `json:"device_name"`
-	DeviceType DeviceType `json:"device_type"`
-	UserAgent  string     `json:"user_agent"`
-	IpAddress  string     `json:"ip_address"`
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	DeviceID   string             `json:"device_id"`
+	DeviceName *string            `json:"device_name"`
+	DeviceType DeviceType         `json:"device_type"`
+	UserAgent  pgtype.Text        `json:"user_agent"`
+	IpAddress  *netip.Addr        `json:"ip_address"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
 }
 
+// =====================================================
+// Create Session
+// =====================================================
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.ID,
@@ -55,6 +83,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.DeviceType,
 		arg.UserAgent,
 		arg.IpAddress,
+		arg.LastUsedAt,
 	)
 	var i Session
 	err := row.Scan(
@@ -66,7 +95,88 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.UserAgent,
 		&i.IpAddress,
 		&i.LastUsedAt,
+		&i.LastRefreshedAt,
+		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RevokedReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveSessionByID = `-- name: GetActiveSessionByID :one
+
+
+
+SELECT id, user_id, device_id, device_name, device_type, user_agent, ip_address, last_used_at, last_refreshed_at, expires_at, revoked_at, revoked_reason, created_at, updated_at
+
+FROM sessions
+
+WHERE id = $1
+
+AND revoked_at IS NULL
+
+LIMIT 1
+`
+
+// =====================================================
+// Find Active Session
+// =====================================================
+func (q *Queries) GetActiveSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
+	row := q.db.QueryRow(ctx, getActiveSessionByID, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceID,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
+		&i.LastRefreshedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokedReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSessionByID = `-- name: GetSessionByID :one
+
+
+
+SELECT id, user_id, device_id, device_name, device_type, user_agent, ip_address, last_used_at, last_refreshed_at, expires_at, revoked_at, revoked_reason, created_at, updated_at
+
+FROM sessions
+
+WHERE id = $1
+
+LIMIT 1
+`
+
+// =====================================================
+// Find Session By ID
+// =====================================================
+func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
+	row := q.db.QueryRow(ctx, getSessionByID, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceID,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
+		&i.LastRefreshedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokedReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -75,12 +185,64 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 
 const revokeSession = `-- name: RevokeSession :exec
 
+
+
 UPDATE sessions
-SET revoked_at = NOW()
+
+SET
+
+    revoked_at = NOW(),
+
+    updated_at = NOW()
+
 WHERE id = $1
 `
 
+// =====================================================
+// Revoke Session
+// =====================================================
 func (q *Queries) RevokeSession(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeSession, id)
+	return err
+}
+
+const updateSessionLastRefreshedAt = `-- name: UpdateSessionLastRefreshedAt :exec
+
+UPDATE sessions
+
+SET
+
+	last_refreshed_at = NOW(),
+
+	updated_at = NOW()
+
+WHERE id = $1
+`
+
+func (q *Queries) UpdateSessionLastRefreshedAt(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, updateSessionLastRefreshedAt, id)
+	return err
+}
+
+const updateSessionLastUsedAt = `-- name: UpdateSessionLastUsedAt :exec
+
+
+
+UPDATE sessions
+
+SET
+
+    last_used_at = NOW(),
+
+    updated_at = NOW()
+
+WHERE id = $1
+`
+
+// =====================================================
+// Update Last Used
+// =====================================================
+func (q *Queries) UpdateSessionLastUsedAt(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, updateSessionLastUsedAt, id)
 	return err
 }

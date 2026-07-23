@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -50,10 +49,15 @@ func (a *Argon2id) Hash(
 ) {
 
 	salt :=
-		make([]byte, a.saltLength)
+		make(
+			[]byte,
+			a.saltLength,
+		)
 
 	_, err :=
-		rand.Read(salt)
+		rand.Read(
+			salt,
+		)
 
 	if err != nil {
 		return "", err
@@ -61,17 +65,11 @@ func (a *Argon2id) Hash(
 
 	hash :=
 		argon2.IDKey(
-
 			[]byte(password),
-
 			salt,
-
 			a.iterations,
-
 			a.memory,
-
 			a.parallelism,
-
 			a.keyLength,
 		)
 
@@ -85,32 +83,35 @@ func (a *Argon2id) Hash(
 
 		a.parallelism,
 
-		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(
+			salt,
+		),
 
-		base64.RawStdEncoding.EncodeToString(hash),
+		base64.RawStdEncoding.EncodeToString(
+			hash,
+		),
 	), nil
 }
 
-func (a *Argon2id) Compare(
-	stored string,
+func (a *Argon2id) Verify(
+	storedHash string,
 	password string,
 ) error {
 
-	parts := strings.Split(
-		stored,
-		"$",
-	)
+	parts :=
+		strings.Split(
+			storedHash,
+			"$",
+		)
 
 	if len(parts) != 6 {
-		return errors.New(
-			"invalid password hash format",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	if parts[0] != "argon2id" {
-		return errors.New(
-			"unsupported password hash algorithm",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	memory, err :=
@@ -121,9 +122,8 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
-		return errors.New(
-			"invalid memory parameter",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	iterations, err :=
@@ -134,9 +134,8 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
-		return errors.New(
-			"invalid iteration parameter",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	parallelism, err :=
@@ -147,9 +146,8 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
-		return errors.New(
-			"invalid parallelism parameter",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	salt, err :=
@@ -158,9 +156,8 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
-		return errors.New(
-			"invalid salt",
-		)
+
+		return domain.ErrInvalidHash
 	}
 
 	expectedHash, err :=
@@ -169,6 +166,7 @@ func (a *Argon2id) Compare(
 		)
 
 	if err != nil {
+
 		return domain.ErrInvalidHash
 	}
 

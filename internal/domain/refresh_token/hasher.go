@@ -1,4 +1,4 @@
-package token
+package refresh_token
 
 type Hasher interface {
 	Hash(

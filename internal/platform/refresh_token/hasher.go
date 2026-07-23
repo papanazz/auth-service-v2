@@ -1,13 +1,13 @@
-package token
+package refresh_token
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	domainToken "github.com/papanazz/auth-service-v2/internal/domain/token"
+	domain "github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 )
 
-var _ domainToken.Hasher = (*SHA256Hasher)(nil)
+var _ domain.Hasher = (*SHA256Hasher)(nil)
 
 type SHA256Hasher struct{}
 
