@@ -12,22 +12,31 @@ type Logger struct {
 }
 
 func New(env string) (*Logger, error) {
-	var (
-		logger *zap.Logger
-		err    error
-	)
+
+	cfg :=
+		zap.NewProductionConfig()
 
 	if env == "local" {
-		logger, err = zap.NewDevelopment(
-			zap.AddCallerSkip(1),
-			zap.AddStacktrace(zapcore.FatalLevel+1),
-		)
-	} else {
-		logger, err = zap.NewProduction(
-			zap.AddCallerSkip(1),
-			zap.AddStacktrace(zapcore.FatalLevel+1),
-		)
+
+		cfg.Encoding = "json"
+
+		cfg.EncoderConfig.EncodeTime =
+			zapcore.ISO8601TimeEncoder
+
+		cfg.EncoderConfig.EncodeLevel =
+			zapcore.CapitalLevelEncoder
+
+		cfg.EncoderConfig.EncodeCaller =
+			zapcore.ShortCallerEncoder
 	}
+
+	logger, err :=
+		cfg.Build(
+			zap.AddCallerSkip(1),
+			zap.AddStacktrace(
+				zapcore.FatalLevel+1,
+			),
+		)
 
 	return &Logger{
 		logger: logger,
@@ -90,16 +99,24 @@ func (l *Logger) Error(
 		metadata = Metadata{}
 	}
 
+	fields :=
+		l.metadataToArgs(
+			ctx,
+			metadata,
+		)
+
 	if err != nil {
-		metadata["error"] = err.Error()
+
+		fields =
+			append(
+				fields,
+				zap.Error(err),
+			)
 	}
 
 	l.logger.Error(
 		message,
-		l.metadataToArgs(
-			ctx,
-			metadata,
-		)...,
+		fields...,
 	)
 }
 
@@ -114,16 +131,24 @@ func (l *Logger) Fatal(
 		metadata = Metadata{}
 	}
 
+	fields :=
+		l.metadataToArgs(
+			ctx,
+			metadata,
+		)
+
 	if err != nil {
-		metadata["error"] = err.Error()
+
+		fields =
+			append(
+				fields,
+				zap.Error(err),
+			)
 	}
 
 	l.logger.Fatal(
 		message,
-		l.metadataToArgs(
-			ctx,
-			metadata,
-		)...,
+		fields...,
 	)
 }
 
@@ -132,29 +157,40 @@ func (l *Logger) metadataToArgs(
 	metadata Metadata,
 ) []zap.Field {
 
-	if metadata == nil {
-		metadata = Metadata{}
-	}
-
-	metadata[string(LogIDKey)] = GetLogID(ctx)
-	metadata[string(TraceIDKey)] = GetTraceID(ctx)
-	metadata[string(RequestIDKey)] = GetRequestID(ctx)
-
-	args := make(
+	fields := make(
 		[]zap.Field,
 		0,
-		len(metadata),
+		len(metadata)+3,
 	)
 
 	for key, value := range metadata {
-		args = append(
-			args,
-			zap.Any(
-				key,
-				value,
-			),
-		)
+
+		fields =
+			append(
+				fields,
+				zap.Any(
+					key,
+					value,
+				),
+			)
 	}
 
-	return args
+	fields =
+		append(
+			fields,
+			zap.String(
+				string(LogIDKey),
+				GetLogID(ctx),
+			),
+			zap.String(
+				string(TraceIDKey),
+				GetTraceID(ctx),
+			),
+			zap.String(
+				string(RequestIDKey),
+				GetRequestID(ctx),
+			),
+		)
+
+	return fields
 }

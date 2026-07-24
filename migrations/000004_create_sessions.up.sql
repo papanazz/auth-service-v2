@@ -157,7 +157,7 @@ CREATE TABLE sessions (
     -- Mobile:
     --   90 days
     --
-    expires_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ,
 
 
 

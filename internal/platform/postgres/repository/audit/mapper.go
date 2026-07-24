@@ -85,14 +85,3 @@ func text(
 		Valid: true,
 	}
 }
-
-func stringPtr(
-	value string,
-) *string {
-
-	if value == "" {
-		return nil
-	}
-
-	return &value
-}

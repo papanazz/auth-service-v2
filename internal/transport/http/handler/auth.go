@@ -55,7 +55,7 @@ func (h *AuthHandler) Login(
 
 	result, err :=
 		h.login.Handle(
-			r.Context(),
+			ctx,
 			login.Command{
 				Email:      req.Email,
 				Password:   req.Password,

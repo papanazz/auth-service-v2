@@ -42,7 +42,7 @@ func (h *UserHandler) Register(
 	}
 
 	res, err := h.register.Handle(
-		r.Context(),
+		ctx,
 		register.Command{
 			Email:    req.Email,
 			Password: req.Password,

@@ -95,17 +95,7 @@ CREATE TABLE authentication_events (
 
 
     created_at TIMESTAMPTZ NOT NULL
-        DEFAULT NOW(),
-
-
-
-    CONSTRAINT fk_auth_events_user
-
-        FOREIGN KEY(user_id)
-
-        REFERENCES users(id)
-
-        ON DELETE SET NULL
+        DEFAULT NOW()
 
 );
 

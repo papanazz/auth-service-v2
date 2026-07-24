@@ -91,7 +91,6 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-
 		_ = s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
@@ -111,7 +110,6 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-
 		_ = s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
@@ -125,7 +123,6 @@ func (s *Service) Handle(
 	}
 
 	if current.ConsumedAt != nil {
-
 		_ =
 			s.refreshTokens.RevokeFamily(
 				ctx,

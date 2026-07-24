@@ -14,6 +14,7 @@ MIGRATION_DIR := migrations
 .PHONY: docker-up
 .PHONY: docker-down
 .PHONY: docker-reset
+.PHONY: run-lint
 .PHONY: run
 .PHONY: test
 
@@ -22,6 +23,7 @@ help:
 	@echo "Available commands:"
 	@echo ""
 	@echo "  make run"
+	@echo "  make run-lint"
 	@echo "  make migration name=create_users"
 	@echo "  make migrate-up"
 	@echo "  make migrate-down"
@@ -81,6 +83,9 @@ docker-down:
 
 docker-reset:
 	docker compose -f deployments/docker-compose.yml down -v
+
+run-lint:
+	golangci-lint run ./...
 
 run:
 	go run ./cmd/server

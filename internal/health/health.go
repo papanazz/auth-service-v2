@@ -22,7 +22,7 @@ func (h *Handler) Health(
 			"application/json",
 		)
 
-	json.NewEncoder(w).
+	_ = json.NewEncoder(w).
 		Encode(
 			map[string]string{
 				"status": "ok",

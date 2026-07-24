@@ -22,9 +22,7 @@ INSERT INTO authentication_events
 
     reason,
 
-    metadata,
-
-    created_at
+    metadata
 )
 
 VALUES
@@ -45,9 +43,7 @@ VALUES
 
     $8,
 
-    $9,
-
-    $10
+    $9
 )
 
 RETURNING *;

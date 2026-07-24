@@ -1,0 +1,23 @@
+# .golangci.yml - configure which linters to run (golangci-lint v2)
+version: "2"
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - govet         # Report suspicious constructs
+    - ineffassign   # Detect unused variable assignments
+    - staticcheck   # Advanced static analysis (includes former gosimple/stylecheck)
+    - unused        # Find unused code
+  settings:
+    errcheck:
+      # Check type assertions
+      check-type-assertions: true
+
+formatters:
+  enable:
+    - gofmt         # Check formatting
+    - goimports     # Check import ordering

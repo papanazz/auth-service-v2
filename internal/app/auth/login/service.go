@@ -301,6 +301,7 @@ func (s *LoginService) Handle(
 			ctx,
 			func(tx pgx.Tx) error {
 
+				now := time.Now()
 				txSessionRepo :=
 					s.sessions.WithTx(
 						tx,
@@ -324,6 +325,8 @@ func (s *LoginService) Handle(
 							IPAddress: cmd.IPAddress,
 
 							UserAgent: cmd.UserAgent,
+
+							LastUsedAt: &now,
 
 							CreatedAt: time.Now().UTC(),
 						},

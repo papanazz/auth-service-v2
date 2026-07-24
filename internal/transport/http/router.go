@@ -55,7 +55,7 @@ func NewRouter(
 		authHandler.Login,
 	)
 
-	refreshHandler := handler.NewRefreshHandler(application.RefreshService)
+	refreshHandler := handler.NewRefreshHandler(application.Logger, application.RefreshService)
 
 	r.Post(
 		"/v1/auth/refresh",
