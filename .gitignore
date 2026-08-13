@@ -6,6 +6,9 @@
 .env
 .env.*
 
+# ...but the template carries no secrets and must be committed.
+!.env.example
+
 # IDE
 .idea/
 .vscode/
