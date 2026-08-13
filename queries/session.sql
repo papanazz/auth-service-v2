@@ -21,7 +21,9 @@ INSERT INTO sessions (
 
     ip_address,
 
-    last_used_at
+    last_used_at,
+
+    expires_at
 
 )
 
@@ -41,7 +43,9 @@ VALUES (
 
     $7,
 
-    $8
+    $8,
+
+    $9
 
 )
 

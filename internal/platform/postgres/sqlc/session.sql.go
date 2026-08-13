@@ -33,7 +33,9 @@ INSERT INTO sessions (
 
     ip_address,
 
-    last_used_at
+    last_used_at,
+
+    expires_at
 
 )
 
@@ -53,7 +55,9 @@ VALUES (
 
     $7,
 
-    $8
+    $8,
+
+    $9
 
 )
 
@@ -69,6 +73,7 @@ type CreateSessionParams struct {
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	IpAddress  *netip.Addr        `json:"ip_address"`
 	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 }
 
 // =====================================================
@@ -84,6 +89,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.UserAgent,
 		arg.IpAddress,
 		arg.LastUsedAt,
+		arg.ExpiresAt,
 	)
 	var i Session
 	err := row.Scan(

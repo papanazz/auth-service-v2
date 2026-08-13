@@ -1,6 +1,7 @@
 package session
 
 import (
+	"net"
 	"net/netip"
 	"time"
 
@@ -34,10 +35,16 @@ func mapCreateParams(
 			input.UserAgent,
 		),
 
-		IpAddress: nil,
+		IpAddress: parseIP(
+			input.IPAddress,
+		),
 
 		LastUsedAt: timeToTimestamptz(
 			input.LastUsedAt,
+		),
+
+		ExpiresAt: timeToTimestamptz(
+			&input.ExpiresAt,
 		),
 	}
 }
@@ -74,8 +81,18 @@ func mapSession(
 			row.LastUsedAt,
 		),
 
+		LastRefreshedAt: timestampValue(
+			row.LastRefreshedAt,
+		),
+
+		ExpiresAt: row.ExpiresAt.Time,
+
 		RevokedAt: timestampValue(
 			row.RevokedAt,
+		),
+
+		RevokedReason: revokeReason(
+			row.RevokedReason,
 		),
 
 		CreatedAt: row.CreatedAt.Time,
@@ -169,4 +186,48 @@ func ipString(
 	}
 
 	return value.String()
+}
+
+// parseIP converts the client address into the INET value the column expects.
+//
+// The transport layer supplies http.Request.RemoteAddr, which carries a port
+// ("203.0.113.10:54321", or "[2001:db8::1]:54321" for IPv6). netip.ParseAddr
+// rejects that form, so the port is stripped first.
+//
+// An unparseable address is stored as NULL rather than failing the login: the
+// address is diagnostic metadata, not an authentication input.
+func parseIP(
+	value string,
+) *netip.Addr {
+
+	if value == "" {
+		return nil
+	}
+
+	candidate := value
+
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		candidate = host
+	}
+
+	addr, err := netip.ParseAddr(candidate)
+
+	if err != nil {
+		return nil
+	}
+
+	return &addr
+}
+
+func revokeReason(
+	value *string,
+) *domain.RevokeReason {
+
+	if value == nil {
+		return nil
+	}
+
+	reason := domain.RevokeReason(*value)
+
+	return &reason
 }
