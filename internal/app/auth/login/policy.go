@@ -12,4 +12,9 @@ type SecurityPolicy struct {
 	Credential security.LimitPolicy
 
 	RefreshTokenTTL time.Duration
+
+	// SessionTTL must be >= RefreshTokenTTL. A refresh token is only accepted
+	// while its session is still active, so a shorter session TTL would reject
+	// tokens that have not expired yet.
+	SessionTTL time.Duration
 }

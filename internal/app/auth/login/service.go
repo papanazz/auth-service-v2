@@ -301,7 +301,8 @@ func (s *LoginService) Handle(
 			ctx,
 			func(tx pgx.Tx) error {
 
-				now := time.Now()
+				now := time.Now().UTC()
+
 				txSessionRepo :=
 					s.sessions.WithTx(
 						tx,
@@ -328,7 +329,13 @@ func (s *LoginService) Handle(
 
 							LastUsedAt: &now,
 
-							CreatedAt: time.Now().UTC(),
+							ExpiresAt: now.
+								Add(
+									s.policy.SessionTTL,
+								).
+								UTC(),
+
+							CreatedAt: now.UTC(),
 						},
 					)
 

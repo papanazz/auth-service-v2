@@ -10,8 +10,6 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/refresh"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 
-	"github.com/papanazz/auth-service-v2/internal/domain/security"
-
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
@@ -135,22 +133,7 @@ func New(
 		// =========================
 
 	loginPolicy :=
-		login.SecurityPolicy{
-
-			IP: security.LimitPolicy{
-
-				Limit: cfg.Security.Login.IP.Limit,
-
-				Window: cfg.Security.Login.IP.Window,
-			},
-
-			Credential: security.LimitPolicy{
-
-				Limit: cfg.Security.Login.Email.Limit,
-
-				Window: cfg.Security.Login.Email.Window,
-			},
-		}
+		newLoginSecurityPolicy(cfg)
 
 	attemptTracker :=
 		authattempt.NewRedisTracker(
