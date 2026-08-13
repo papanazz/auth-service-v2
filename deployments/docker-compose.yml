@@ -101,6 +101,8 @@ services:
       JWT_SECRET_KEY: lMQvPqbGocV4Y5u0RwRrB9H
       JWT_TTL: 15m
       REFRESH_TOKEN_TTL: 24h
+      # Must be >= REFRESH_TOKEN_TTL; Config.Validate refuses to start otherwise.
+      SESSION_TTL: 720h
       LOGIN_IP_LIMIT: 20
       LOGIN_IP_WINDOW: 1m
       LOGIN_EMAIL_LIMIT: 5
