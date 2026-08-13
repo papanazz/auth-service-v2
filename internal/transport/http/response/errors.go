@@ -31,8 +31,13 @@ func WriteError(
 
 			status = http.StatusNotFound
 
-		case errs.CodeInvalidCredentials:
+		case errs.CodeInvalidCredentials,
+			errs.CodeInvalidRefreshToken,
+			errs.CodeRefreshTokenReplay:
 
+			// A replayed token is an authentication failure, not a server
+			// fault. Returning 500 would both mislead the client and page
+			// an on-call engineer for what is a client-side event.
 			status = http.StatusUnauthorized
 
 		case errs.CodeEmailNotVerified,

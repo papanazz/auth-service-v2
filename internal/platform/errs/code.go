@@ -22,4 +22,8 @@ const (
 	CodeAccountLocked Code = "ACCOUNT_LOCKED"
 
 	CodeTooManyRequest Code = "TOO_MANY_REQUEST"
+
+	CodeInvalidRefreshToken Code = "AUTH_INVALID_REFRESH_TOKEN"
+
+	CodeRefreshTokenReplay Code = "AUTH_REFRESH_TOKEN_REPLAY"
 )
