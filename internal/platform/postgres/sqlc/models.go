@@ -106,10 +106,11 @@ func (ns NullRefreshTokenRevokeReason) Value() (driver.Value, error) {
 type UserStatus string
 
 const (
-	UserStatusACTIVE              UserStatus = "ACTIVE"
-	UserStatusLOCKED              UserStatus = "LOCKED"
-	UserStatusDISABLED            UserStatus = "DISABLED"
-	UserStatusPENDINGVERIFICATION UserStatus = "PENDING_VERIFICATION"
+	UserStatusPENDING   UserStatus = "PENDING"
+	UserStatusACTIVE    UserStatus = "ACTIVE"
+	UserStatusSUSPENDED UserStatus = "SUSPENDED"
+	UserStatusLOCKED    UserStatus = "LOCKED"
+	UserStatusDELETED   UserStatus = "DELETED"
 )
 
 func (e *UserStatus) Scan(src interface{}) error {
