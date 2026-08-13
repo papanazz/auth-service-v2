@@ -21,6 +21,8 @@ const (
 
 	EventTokenRefresh EventType = "TOKEN_REFRESH"
 
+	EventTokenRefreshFailed EventType = "TOKEN_REFRESH_FAILED"
+
 	EventTokenReuseDetected EventType = "TOKEN_REUSE_DETECTED"
 
 	EventPasswordChanged EventType = "PASSWORD_CHANGED"

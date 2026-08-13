@@ -14,7 +14,7 @@ func refreshSuccessEvent(
 
 		ID: uuid.New(),
 
-		Type: "REFRESH_SUCCESS",
+		Type: audit.EventTokenRefresh,
 
 		UserID: &userID,
 
@@ -32,7 +32,7 @@ func refreshFailedEvent(
 
 			ID: uuid.New(),
 
-			Type: "REFRESH_FAILED",
+			Type: audit.EventTokenRefreshFailed,
 
 			Success: false,
 
@@ -56,7 +56,7 @@ func refreshReplayEvent(
 
 		ID: uuid.New(),
 
-		Type: "REFRESH_TOKEN_REPLAY",
+		Type: audit.EventTokenReuseDetected,
 
 		UserID: &userID,
 
