@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -65,6 +66,7 @@ type RedisConfig struct {
 type SecurityConfig struct {
 	JWT          JWTConfig
 	RefreshToken RefreshTokenConfig
+	Session      SessionConfig
 	Login        LoginSecurityConfig
 }
 
@@ -75,6 +77,15 @@ type JWTConfig struct {
 
 type RefreshTokenConfig struct {
 	TTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"720h"`
+}
+
+// SessionConfig bounds how long an authenticated session may live.
+//
+// It must be at least as long as RefreshTokenConfig.TTL: a refresh token is
+// only usable while its owning session is still active, so a shorter session
+// TTL would silently invalidate tokens that have not yet expired.
+type SessionConfig struct {
+	TTL time.Duration `env:"SESSION_TTL" envDefault:"2160h"`
 }
 
 type LoginSecurityConfig struct {
@@ -123,6 +134,40 @@ func (c *Config) Validate() error {
 
 	if c.Security.JWT.SecretKey == "" {
 		return errors.New("JWT_SECRET_KEY is required")
+	}
+
+	if c.Security.JWT.TTL <= 0 {
+		return errors.New("JWT_TTL must be positive")
+	}
+
+	if c.Security.RefreshToken.TTL <= 0 {
+		return errors.New("REFRESH_TOKEN_TTL must be positive")
+	}
+
+	if c.Security.Session.TTL <= 0 {
+		return errors.New("SESSION_TTL must be positive")
+	}
+
+	// A refresh token is only honoured while its session is still active, so a
+	// session that expires first silently rejects tokens that have not expired
+	// yet. Fail at startup instead of at 3am.
+	if c.Security.Session.TTL < c.Security.RefreshToken.TTL {
+		return fmt.Errorf(
+			"SESSION_TTL (%s) must be greater than or equal to REFRESH_TOKEN_TTL (%s), "+
+				"otherwise refresh tokens are rejected by an expired session before they expire",
+			c.Security.Session.TTL,
+			c.Security.RefreshToken.TTL,
+		)
+	}
+
+	// An access token that outlives its refresh token cannot be rotated away,
+	// which defeats the point of short-lived access tokens.
+	if c.Security.JWT.TTL > c.Security.RefreshToken.TTL {
+		return fmt.Errorf(
+			"JWT_TTL (%s) must not exceed REFRESH_TOKEN_TTL (%s)",
+			c.Security.JWT.TTL,
+			c.Security.RefreshToken.TTL,
+		)
 	}
 
 	return nil
