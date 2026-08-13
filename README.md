@@ -9,11 +9,13 @@ Production-grade authentication service built with Go.
 - JWT authentication
 - Refresh token rotation
 - Session management
-- RBAC
 - Audit logging
 - HTTP API
-- gRPC API
 - OpenTelemetry observability
+
+## Roadmap
+
+- gRPC transport (the application and repository layers are transport-agnostic; this adds `internal/transport/grpc` alongside the existing HTTP handlers)
 
 ## Tech Stack
 
