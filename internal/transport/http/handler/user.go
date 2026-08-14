@@ -36,7 +36,11 @@ func (h *UserHandler) Register(
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Error(ctx, "[Register] Invalid Params", err, nil)
+
+		h.logger.Warn(ctx, "[Register] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
+
 		response.WriteError(w, errs.ErrInvalidRequest)
 		return
 	}
@@ -52,8 +56,12 @@ func (h *UserHandler) Register(
 	)
 
 	if err != nil {
-		h.logger.Error(ctx, "[Register] Got error from service", err, nil)
-		response.WriteError(w, err)
+
+		response.LogAndWriteError(w, ctx, h.logger, "Register", err, logger.Metadata{
+			"email":      logger.MaskEmail(req.Email),
+			"user_agent": r.UserAgent(),
+		})
+
 		return
 	}
 

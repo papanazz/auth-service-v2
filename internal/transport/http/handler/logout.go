@@ -45,6 +45,10 @@ func (h *LogoutHandler) Handle(
 				&req,
 			); err != nil {
 
+		h.logger.Warn(ctx, "[Logout] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
+
 		response.WriteError(
 			w,
 			errs.ErrInvalidRequest,
@@ -67,11 +71,12 @@ func (h *LogoutHandler) Handle(
 		)
 
 	if err != nil {
-		h.logger.Error(ctx, "[Logout] Got error from service", err, nil)
-		response.WriteError(
-			w,
-			err,
-		)
+
+		// The refresh token is never logged — same reasoning as refresh
+		// itself (docs/logging.md).
+		response.LogAndWriteError(w, ctx, h.logger, "Logout", err, logger.Metadata{
+			"user_agent": r.UserAgent(),
+		})
 
 		return
 	}

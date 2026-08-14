@@ -45,6 +45,10 @@ func (h *RefreshHandler) Handle(
 				&req,
 			); err != nil {
 
+		h.logger.Warn(ctx, "[Refresh] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
+
 		response.WriteError(
 			w,
 			errs.ErrInvalidRequest,
@@ -67,11 +71,15 @@ func (h *RefreshHandler) Handle(
 		)
 
 	if err != nil {
-		h.logger.Error(ctx, "[Refresh] Got error from service", err, nil)
-		response.WriteError(
-			w,
-			err,
-		)
+
+		// The refresh token itself is never logged, masked or not —
+		// it's a bearer credential, the same class as a password. No
+		// user/session identifier is available at this layer on
+		// failure (only the service, past the point of failure, ever
+		// resolves one) — see docs/logging.md.
+		response.LogAndWriteError(w, ctx, h.logger, "Refresh", err, logger.Metadata{
+			"user_agent": r.UserAgent(),
+		})
 
 		return
 	}

@@ -43,7 +43,10 @@ func (h *AuthHandler) Login(
 		r.Body,
 	).
 		Decode(&req); err != nil {
-		h.logger.Error(ctx, "[Login] Invalid Params", err, nil)
+
+		h.logger.Warn(ctx, "[Login] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
 
 		response.WriteError(
 			w,
@@ -68,8 +71,18 @@ func (h *AuthHandler) Login(
 		)
 
 	if err != nil {
-		h.logger.Error(ctx, "[Login] Got error from service", err, nil)
-		response.WriteError(w, err)
+
+		// Never req.Password. email is masked (logger.MaskEmail) —
+		// server-side logs are a wider-access surface than the
+		// database column it's also stored in unmasked, same reasoning
+		// as the rest of this pass (docs/logging.md).
+		response.LogAndWriteError(w, ctx, h.logger, "Login", err, logger.Metadata{
+			"email":       logger.MaskEmail(req.Email),
+			"device_id":   req.DeviceID,
+			"device_type": req.DeviceType,
+			"user_agent":  r.UserAgent(),
+		})
+
 		return
 	}
 

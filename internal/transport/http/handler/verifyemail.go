@@ -45,6 +45,10 @@ func (h *VerifyEmailHandler) Handle(
 				&req,
 			); err != nil {
 
+		h.logger.Warn(ctx, "[VerifyEmail] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
+
 		response.WriteError(
 			w,
 			errs.ErrInvalidRequest,
@@ -67,11 +71,12 @@ func (h *VerifyEmailHandler) Handle(
 		)
 
 	if err != nil {
-		h.logger.Error(ctx, "[VerifyEmail] Got error from service", err, nil)
-		response.WriteError(
-			w,
-			err,
-		)
+
+		// The verification token is never logged — it's a bearer
+		// credential, same as a refresh token (docs/logging.md).
+		response.LogAndWriteError(w, ctx, h.logger, "VerifyEmail", err, logger.Metadata{
+			"user_agent": r.UserAgent(),
+		})
 
 		return
 	}

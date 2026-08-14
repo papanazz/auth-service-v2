@@ -30,7 +30,7 @@ func Logger(logger *logger.Logger) func(http.Handler) http.Handler {
 
 				next.ServeHTTP(rw, r)
 
-				if r.URL.Path != "/metrics" && r.URL.Path != "/health" {
+				if r.URL.Path != "/metrics" && r.URL.Path != "/health" && r.URL.Path != "/ready" {
 					logger.Info(
 						r.Context(),
 						"http_request",

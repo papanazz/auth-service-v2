@@ -45,6 +45,10 @@ func (h *ResendVerificationHandler) Handle(
 				&req,
 			); err != nil {
 
+		h.logger.Warn(ctx, "[ResendVerification] malformed request body", logger.Metadata{
+			"error": err.Error(),
+		})
+
 		response.WriteError(
 			w,
 			errs.ErrInvalidRequest,
@@ -67,11 +71,17 @@ func (h *ResendVerificationHandler) Handle(
 		)
 
 	if err != nil {
-		h.logger.Error(ctx, "[ResendVerification] Got error from service", err, nil)
-		response.WriteError(
-			w,
-			err,
-		)
+
+		// This only fires for a genuine failure (rate limited, infra
+		// error) — the unknown-email/already-verified no-op paths
+		// return nil from the service and never reach here, so logging
+		// the (masked) email on an actual error doesn't reopen the
+		// enumeration-safety the 204 response already guarantees
+		// (docs/email-verification.md Decisions).
+		response.LogAndWriteError(w, ctx, h.logger, "ResendVerification", err, logger.Metadata{
+			"email":      logger.MaskEmail(req.Email),
+			"user_agent": r.UserAgent(),
+		})
 
 		return
 	}
