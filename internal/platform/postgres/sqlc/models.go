@@ -159,6 +159,7 @@ type AuthenticationEvent struct {
 	Reason    *string            `json:"reason"`
 	Metadata  []byte             `json:"metadata"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	SessionID *uuid.UUID         `json:"session_id"`
 }
 
 type RefreshToken struct {

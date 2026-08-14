@@ -29,6 +29,8 @@ func mapCreateParams(
 
 		UserID: event.UserID,
 
+		SessionID: event.SessionID,
+
 		Email: &event.Email,
 
 		IpAddress: parseIP(

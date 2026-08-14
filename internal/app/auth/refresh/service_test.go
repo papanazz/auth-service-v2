@@ -86,6 +86,83 @@ func TestService_Handle_Success(t *testing.T) {
 	}
 }
 
+// The audit trail must carry the same client context login's does, and the
+// session actually involved — not just the user.
+func TestService_Handle_AuditEventCarriesContext(t *testing.T) {
+
+	h := newHarness()
+
+	_, err := h.service().Handle(
+		context.Background(),
+		Command{
+			RefreshToken: h.rawToken,
+			IPAddress:    "203.0.113.10",
+			UserAgent:    "Mozilla/5.0",
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(h.audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(h.audit.events))
+	}
+
+	event := h.audit.events[0]
+
+	if event.UserID == nil || *event.UserID != h.session.UserID {
+		t.Errorf("event user ID = %v, want %v", event.UserID, h.session.UserID)
+	}
+
+	if event.SessionID == nil || *event.SessionID != h.session.ID {
+		t.Errorf("event session ID = %v, want %v", event.SessionID, h.session.ID)
+	}
+
+	if event.IPAddress != "203.0.113.10" {
+		t.Errorf("event IP = %q, want %q", event.IPAddress, "203.0.113.10")
+	}
+
+	if event.UserAgent != "Mozilla/5.0" {
+		t.Errorf("event user agent = %q, want %q", event.UserAgent, "Mozilla/5.0")
+	}
+}
+
+// Regression test: refreshFailedEvent's session-lookup-failure branch once
+// passed the session ID as the userID argument, silently writing the wrong
+// identifier into the audit trail's user_id column. The session ID must
+// land in SessionID; UserID must stay nil, since the failed lookup is
+// exactly what leaves the user unresolved.
+func TestService_Handle_SessionLookupFailureDoesNotMisattributeUserID(t *testing.T) {
+
+	h := newHarness()
+
+	delete(h.sessions.stored, h.session.ID)
+
+	_, err := h.service().Handle(
+		context.Background(),
+		Command{RefreshToken: h.rawToken},
+	)
+
+	if !errors.Is(err, errs.ErrInvalidRefreshToken) {
+		t.Fatalf("error = %v, want %v", err, errs.ErrInvalidRefreshToken)
+	}
+
+	if len(h.audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(h.audit.events))
+	}
+
+	event := h.audit.events[0]
+
+	if event.UserID != nil {
+		t.Errorf("event user ID = %v, want nil — the user was never resolved", event.UserID)
+	}
+
+	if event.SessionID == nil || *event.SessionID != h.session.ID {
+		t.Errorf("event session ID = %v, want %v", event.SessionID, h.session.ID)
+	}
+}
+
 // Regression test: the access token minted on refresh must carry the real
 // session ID. It previously left SessionID unset, so every access token
 // issued via refresh carried a zeroed "sid" claim instead of the session's

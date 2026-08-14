@@ -1,0 +1,284 @@
+REFRESH
+=======
+
+POST /v1/auth/refresh
+
+Exchanges a refresh token for a new access token, rotating the refresh
+token itself in the same call. Does not require an Idempotency-Key —
+see IDEMPOTENCY below for why login and refresh made opposite choices.
+
+
+FLOW
+----
+
+internal/app/auth/refresh/service.go — Service.Handle
+
+  1. Locate the presented token
+       Hash the raw token, look it up by hash (raw tokens are never
+       stored — see docs/login.txt's DECISIONS on the same point for
+       login). Not found → ErrInvalidRefreshToken, audited.
+
+  2. Resolve its owning session
+       FindByID(current.SessionID). Not found → ErrInvalidRefreshToken,
+       audited. Only the session ID is known at this point — see
+       CROSS-CUTTING FIXES for why this distinction matters.
+
+  3. Detect replay
+       current.ConsumedAt != nil means this exact token has already been
+       exchanged once — rotation makes every token single-use, so a
+       second use can only mean two parties hold the same one. The
+       whole family is revoked (RevokeReasonReplay), not just this
+       token: every descendant of a compromised token is equally
+       suspect. This is a fast path, not the real guard — see step 6.
+
+  4. Reject a revoked or expired token or session
+       Both current (the token) and sessionData (its session) are
+       checked for RevokedAt/ExpiresAt. Either failing returns the same
+       ErrInvalidRefreshToken a client can't distinguish from "never
+       existed" — a revoked/expired token carries no more information
+       to a caller than an unknown one does.
+
+  5. Mint the replacement token
+       New raw token + hash, chained to the presented token
+       (ParentTokenID) within the same FamilyID. Not yet persisted.
+
+  6. Persist the rotation atomically
+       Single transaction: Consume(current.ID) — a conditional UPDATE
+       (consumed_at IS NULL) — then Create the replacement, then
+       UpdateLastRefreshedAt on the session. Consume is the actual
+       concurrency guard: it's a compare-and-swap, so exactly one
+       concurrent caller for the same token wins it; every loser gets
+       !consumed and is funneled into the same replay handling as step
+       3 (family revoked, TOKEN_REUSE_DETECTED audited). Verified under
+       -race with 32 concurrent callers presenting the identical token:
+       exactly 1 success, 31 replays, exactly 1 replacement token
+       issued.
+
+  7. Mint the new access token
+       Claims: sub=UserID, sid=SessionID. See CROSS-CUTTING FIXES — this
+       used to omit SessionID.
+
+  8. Publish audit event
+       TOKEN_REFRESH, success=true, with userID/sessionID/IP/UA.
+
+
+IDEMPOTENCY
+-----------
+
+Refresh does not use the Idempotency-Key mechanism login uses (see
+docs/login.txt). It doesn't need to: rotation is already
+self-idempotent-adjacent by construction — Consume's compare-and-swap
+means a retried request with the same (now-consumed) token is
+indistinguishable from an attacker replaying it, and is correctly
+rejected either way. A genuine client retry after a dropped connection
+gets a REPLAY error, not a duplicate side effect — the client's real
+fix is to retry with the *new* token if it received one, or treat the
+replay as "the previous attempt actually succeeded, tokens were
+issued, I just didn't see the response." This is a materially different
+retry story than login's (which mints a brand-new session per attempt
+and has no CAS-guarded resource to fall back on), which is why refresh
+doesn't carry the same gap login did before this review.
+
+
+DECISIONS
+---------
+
+* No rate limiting on this endpoint, unlike login. Deliberate, not an
+  oversight: login's rate limiting defends against password guessing,
+  which is feasible because passwords are low-entropy and
+  human-chosen. Refresh tokens are 256-bit random values (platform/
+  refresh_token.Generator) — brute-forcing one is not a practical
+  attack, so the rate limiter's purpose doesn't transfer. Resource
+  exhaustion / DoS protection is a different, unaddressed concern (see
+  GAPS).
+
+* current.ConsumedAt is checked before entering the transaction (step
+  3) purely as a fast path for an obviously-already-spent token. The
+  real correctness guarantee is Consume's CAS inside the transaction
+  (step 6) — removing the step-3 check would not reintroduce a race,
+  only add unnecessary transaction overhead for the common
+  slow-replay case.
+
+* sessions.Repository.FindByID is used here, not FindActiveByID.
+  FindActiveByID only filters on revoked_at at the SQL level — expiry
+  still has to be checked in Go regardless of which one is called (see
+  flow step 4) — so switching would not remove a manual check, only
+  change which error path a revoked session takes on the way to the
+  same ErrInvalidRefreshToken. Left as FindByID deliberately; not a
+  gap.
+
+
+CAPABILITIES
+------------
+
+* Refresh token rotation: each exchange is single-use, chained via
+  ParentTokenID inside a FamilyID.
+* Replay detection with full-family revocation, verified as
+  race-correct under concurrent identical requests, not just
+  sequential ones.
+* Full audit trail: TOKEN_REFRESH (success), TOKEN_REFRESH_FAILED
+  (unknown/expired/revoked token or session), TOKEN_REUSE_DETECTED
+  (replay) — each now carrying user ID, session ID, IP, and user agent
+  (see CROSS-CUTTING FIXES).
+
+
+CROSS-CUTTING FIXES LANDED DURING THIS REVIEW
+-----------------------------------------------
+
+* Access token SessionID (fixed earlier this session, referenced here
+  for the full picture): the access token minted by refresh never set
+  SessionID in its claims, so `sid` came out as the zero UUID after any
+  refresh. Fixed in internal/app/auth/refresh/service.go; regression
+  test TestService_Handle_AccessTokenCarriesSessionID.
+
+* refresh.Command carried no IPAddress/UserAgent at all — unlike
+  login's Command. Every refresh audit event was missing this context
+  for every user, always. Added the fields, threaded them from
+  handler/refresh.go (r.RemoteAddr / r.UserAgent()), same pattern as
+  login and register.
+
+* Audit event constructors rewritten to use audit.New(...) — the
+  convention login/register/logout already followed — instead of
+  building the struct literal by hand. The literal form skipped
+  Metadata initialization (audit.New sets it to an empty map; the
+  literal form left it nil, marshaling to JSON null instead of {}) and
+  was the reason the SessionID bug below went unnoticed for as long as
+  it did: a hand-built literal has no compiler-enforced shape to catch
+  an argument landing in the wrong field.
+
+* Bug: refreshFailedEvent's session-lookup-failure call site
+  (previously `refreshFailedEvent(&current.SessionID, ...)`, first
+  positional argument) was passing a *session* ID into what the
+  function signature called `userID`. Both are uuid.UUID, so it
+  compiled silently and would have written the wrong identifier into
+  the audit trail's user_id column for every refresh whose session
+  lookup failed. Fixed by adding a proper sessionID parameter to all
+  three event constructors instead of overloading one slot for two
+  different kinds of ID. Regression test:
+  TestService_Handle_SessionLookupFailureDoesNotMisattributeUserID.
+
+* Bigger fix, found via this endpoint but affecting every endpoint:
+  audit.Event.SessionID had no column to land in at all.
+  authentication_events had no session_id column since the table was
+  created — every event's SessionID (already being set correctly by
+  login and now refresh) was silently discarded by the mapper on every
+  write, for every endpoint, since audit logging was introduced. Fixed
+  with migration 000008_add_session_id_to_authentication_events (new
+  nullable column + index, unconstrained like user_id — audit rows must
+  survive a deleted session), a queries/audit_logs.sql update, and
+  mapper.go now passing event.SessionID through. Verified live: a full
+  register -> login -> refresh -> logout run now shows session_id
+  populated on LOGIN_SUCCESS, TOKEN_REFRESH, and LOGOUT rows (and
+  correctly absent on USER_REGISTERED, which has no session yet).
+
+
+GAPS (known, deliberate, not implemented in this pass)
+-------------------------------------------------------
+
+* No rate limiting or abuse protection on this endpoint (see
+  DECISIONS for why brute-forcing a token isn't the relevant threat).
+  A resource-exhaustion angle (many refresh calls per second from one
+  source) is unaddressed and would need its own justification and
+  policy if it becomes a concern — not the same problem login's rate
+  limiter solves, so not solved by reusing it.
+
+
+API CONTRACT
+------------
+
+Request
+
+  POST /v1/auth/refresh
+  Content-Type: application/json
+
+  {
+    "refresh_token": string,  required, raw token as issued by login
+                               or a previous refresh
+  }
+
+Success — 200 OK
+
+  {
+    "data": {
+      "access_token":  string (JWT, sid = the session's real ID),
+      "refresh_token": string (new raw token — the presented one is now
+                                consumed and unusable),
+      "expires_in":    number (seconds until the access token expires)
+    }
+  }
+
+Errors
+
+  400 INVALID_REQUEST          malformed JSON body
+  401 AUTH_INVALID_REFRESH_TOKEN   unknown, expired, or revoked token or
+                                session — a client cannot distinguish
+                                these from each other
+  401 AUTH_REFRESH_TOKEN_REPLAY    a consumed token was presented again;
+                                the entire token family has been revoked
+                                as a side effect — every token derived
+                                from it, including ones not yet
+                                consumed, stops working
+  500 INTERNAL_ERROR           unexpected failure
+
+
+TESTED SCENARIOS
+-----------------
+
+Unit — internal/app/auth/refresh/service_test.go, run via
+`go test ./internal/app/auth/refresh/... -race`:
+
+  - full success path: new token issued, chained to the correct parent
+    and family, session's last_refreshed_at updated
+  - access token claims carry the real SessionID (regression test)
+  - a session with a real (non-zero) future expiry is accepted
+  - a session with a zero ExpiresAt is rejected as expired, not
+    accepted (regression test for a prior outage where every refresh
+    against a login-created session looked expired)
+  - unknown token, gone session, expired token, revoked token, revoked
+    session, transaction failure, access-token generation failure — all
+    rejected/propagated correctly
+  - presenting an already-consumed token revokes the whole family
+    (regression test)
+  - 32 concurrent goroutines presenting the identical token: exactly 1
+    success, 31 replay rejections, exactly 1 replacement token created
+    (run under -race)
+  - audit events carry the correct user ID, session ID, IP, and user
+    agent (new this review)
+  - a failed session lookup does not misattribute the session ID as the
+    user ID in the audit trail (regression test for the bug found this
+    review)
+
+e2e — against the real docker-compose stack, verified manually this
+session:
+
+  - register -> login -> refresh -> logout, full lifecycle, repeated
+    after every change in this review pass
+  - refreshing, then replaying the now-consumed token -> 401 replay,
+    correctly audited with both user_id and session_id populated
+  - authentication_events.session_id confirmed populated for
+    LOGIN_SUCCESS, TOKEN_REFRESH, and LOGOUT rows after the migration;
+    correctly NULL for USER_REGISTERED
+  - authentication_events.ip_address / user_agent confirmed populated
+    for a TOKEN_REFRESH row (previously always NULL/empty)
+
+
+RELATED FILES
+-------------
+
+internal/app/auth/refresh/service.go        use case
+internal/app/auth/refresh/event.go          TOKEN_REFRESH / _FAILED /
+                                             TOKEN_REUSE_DETECTED
+internal/domain/refresh_token/              Token entity, Repository,
+                                             Generator, Hasher interfaces
+internal/domain/session/repository.go       FindByID, UpdateLastRefreshedAt
+internal/domain/audit/event.go              Event.SessionID
+internal/platform/postgres/repository/refresh_token/   Postgres Repository
+internal/platform/postgres/repository/audit/mapper.go  SessionID mapping
+internal/transport/http/handler/refresh.go  HTTP handler
+internal/transport/http/router.go           POST /v1/auth/refresh
+queries/refresh_token.sql                   Consume, RevokeFamily, etc.
+queries/audit_logs.sql                      CreateAuthenticationEvent
+migrations/000005_create_refresh_tokens.up.sql       refresh_tokens table
+migrations/000006_create_authentication_events.up.sql   original table
+migrations/000008_add_session_id_to_authentication_events.up.sql
+                                             session_id column, this review

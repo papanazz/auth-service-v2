@@ -59,6 +59,10 @@ func (h *RefreshHandler) Handle(
 			refresh.Command{
 
 				RefreshToken: req.RefreshToken,
+
+				IPAddress: r.RemoteAddr,
+
+				UserAgent: r.UserAgent(),
 			},
 		)
 

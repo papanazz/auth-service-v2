@@ -18,6 +18,10 @@ import (
 
 type Command struct {
 	RefreshToken string
+
+	IPAddress string
+
+	UserAgent string
 }
 
 type Result struct {
@@ -79,6 +83,10 @@ func (s *Service) Handle(
 	cmd Command,
 ) (*Result, error) {
 
+	//
+	// 1. Locate the presented token
+	//
+
 	hash :=
 		s.refreshHasher.Hash(
 			cmd.RefreshToken,
@@ -95,6 +103,9 @@ func (s *Service) Handle(
 			ctx,
 			refreshFailedEvent(
 				nil,
+				nil,
+				cmd.IPAddress,
+				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
 		)
@@ -102,6 +113,17 @@ func (s *Service) Handle(
 		return nil,
 			errs.ErrInvalidRefreshToken
 	}
+
+	//
+	// 2. Resolve its owning session
+	//
+	// A token can outlive the session lookup finding nothing (the FK is
+	// ON DELETE CASCADE, but nothing currently deletes sessions outright —
+	// this guards the theoretical case, and a corrupted/foreign token
+	// hash collision). Only the session ID is known at this point, never
+	// the user ID: that is exactly what this lookup failing means we
+	// don't have.
+	//
 
 	sessionData, err :=
 		s.sessions.FindByID(
@@ -113,7 +135,10 @@ func (s *Service) Handle(
 		_ = s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
+				nil,
 				&current.SessionID,
+				cmd.IPAddress,
+				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
 		)
@@ -121,6 +146,16 @@ func (s *Service) Handle(
 		return nil,
 			errs.ErrInvalidRefreshToken
 	}
+
+	//
+	// 3. Detect replay
+	//
+	// A consumed token presented again is the signature of a stolen token
+	// being replayed — rotation means each token is single-use, so a
+	// second use can only mean two parties hold the same one. The whole
+	// family is revoked, not just this token, since every descendant of a
+	// compromised token is equally suspect.
+	//
 
 	if current.ConsumedAt != nil {
 		_ =
@@ -135,12 +170,19 @@ func (s *Service) Handle(
 				ctx,
 				refreshReplayEvent(
 					sessionData.UserID,
+					current.SessionID,
+					cmd.IPAddress,
+					cmd.UserAgent,
 				),
 			)
 
 		return nil,
 			errs.ErrRefreshTokenReplay
 	}
+
+	//
+	// 4. Reject a revoked or expired token or session
+	//
 
 	if current.RevokedAt != nil ||
 		current.ExpiresAt.Before(time.Now()) {
@@ -149,6 +191,9 @@ func (s *Service) Handle(
 			ctx,
 			refreshFailedEvent(
 				&sessionData.UserID,
+				&current.SessionID,
+				cmd.IPAddress,
+				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
 		)
@@ -164,6 +209,9 @@ func (s *Service) Handle(
 			ctx,
 			refreshFailedEvent(
 				&sessionData.UserID,
+				&current.SessionID,
+				cmd.IPAddress,
+				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
 		)
@@ -171,6 +219,10 @@ func (s *Service) Handle(
 		return nil,
 			errs.ErrInvalidRefreshToken
 	}
+
+	//
+	// 5. Mint the replacement token
+	//
 
 	rawToken, err :=
 		s.refreshGenerator.Generate()
@@ -199,6 +251,15 @@ func (s *Service) Handle(
 					s.refreshTTL,
 				),
 		}
+
+	//
+	// 6. Persist the rotation atomically
+	//
+	// Consume is a conditional UPDATE (consumed_at IS NULL), so exactly one
+	// concurrent caller wins it; every loser is treated as a replay below.
+	// This is the real concurrency guard — the ConsumedAt check in step 3
+	// is only a fast path for a token that is obviously already spent.
+	//
 
 	err =
 		s.transaction.WithinTransaction(
@@ -262,6 +323,9 @@ func (s *Service) Handle(
 					ctx,
 					refreshReplayEvent(
 						sessionData.UserID,
+						current.SessionID,
+						cmd.IPAddress,
+						cmd.UserAgent,
 					),
 				)
 
@@ -269,6 +333,10 @@ func (s *Service) Handle(
 
 		return nil, err
 	}
+
+	//
+	// 7. Mint the new access token
+	//
 
 	accessToken, err :=
 		s.accessTokens.Generate(
@@ -284,11 +352,18 @@ func (s *Service) Handle(
 		return nil, err
 	}
 
+	//
+	// 8. Publish audit event
+	//
+
 	_ =
 		s.audit.Publish(
 			ctx,
 			refreshSuccessEvent(
 				sessionData.UserID,
+				sessionData.ID,
+				cmd.IPAddress,
+				cmd.UserAgent,
 			),
 		)
 

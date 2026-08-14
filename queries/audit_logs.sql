@@ -12,6 +12,8 @@ INSERT INTO authentication_events
 
     user_id,
 
+    session_id,
+
     email,
 
     ip_address,
@@ -43,7 +45,9 @@ VALUES
 
     $8,
 
-    $9
+    $9,
+
+    $10
 )
 
 RETURNING *;

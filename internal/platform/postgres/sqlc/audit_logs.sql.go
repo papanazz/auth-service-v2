@@ -24,6 +24,8 @@ INSERT INTO authentication_events
 
     user_id,
 
+    session_id,
+
     email,
 
     ip_address,
@@ -55,16 +57,19 @@ VALUES
 
     $8,
 
-    $9
+    $9,
+
+    $10
 )
 
-RETURNING id, type, user_id, email, ip_address, user_agent, success, reason, metadata, created_at
+RETURNING id, type, user_id, email, ip_address, user_agent, success, reason, metadata, created_at, session_id
 `
 
 type CreateAuthenticationEventParams struct {
 	ID        uuid.UUID   `json:"id"`
 	Type      string      `json:"type"`
 	UserID    *uuid.UUID  `json:"user_id"`
+	SessionID *uuid.UUID  `json:"session_id"`
 	Email     *string     `json:"email"`
 	IpAddress *netip.Addr `json:"ip_address"`
 	UserAgent pgtype.Text `json:"user_agent"`
@@ -81,6 +86,7 @@ func (q *Queries) CreateAuthenticationEvent(ctx context.Context, arg CreateAuthe
 		arg.ID,
 		arg.Type,
 		arg.UserID,
+		arg.SessionID,
 		arg.Email,
 		arg.IpAddress,
 		arg.UserAgent,
@@ -100,6 +106,7 @@ func (q *Queries) CreateAuthenticationEvent(ctx context.Context, arg CreateAuthe
 		&i.Reason,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.SessionID,
 	)
 	return i, err
 }
