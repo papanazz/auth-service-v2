@@ -20,6 +20,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/platform/metrics"
 	"github.com/papanazz/auth-service-v2/internal/platform/token"
+	"github.com/papanazz/auth-service-v2/internal/platform/tracing"
 
 	"github.com/papanazz/auth-service-v2/internal/platform/password"
 	"github.com/papanazz/auth-service-v2/internal/platform/postgres/sqlc"
@@ -164,8 +165,10 @@ func New(
 
 	auditPublisher :=
 		metrics.NewAuditPublisher(
-			auditRepo.NewAuditPublisher(
-				queries,
+			tracing.NewAuditPublisher(
+				auditRepo.NewAuditPublisher(
+					queries,
+				),
 			),
 			appMetrics,
 		)

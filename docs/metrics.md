@@ -102,7 +102,11 @@ plausible count, no IP address or hash anywhere in the label set.
   wire one in — exactly the class of bug `internal/app/policy.go`'s
   `TestNew*SecurityPolicy_WiresEveryField` reflection tests exist to
   catch for security policy fields. No use-case file changes for this
-  feature.
+  feature. `internal/platform/tracing.AuditPublisher` (`docs/tracing.md`)
+  wraps the same shared instance the same way, for the same reason, to
+  attach `event.type`/`event.success`/`user.id`/`session.id` to the
+  active trace span — a separate decorator rather than folding tracing
+  into this one, since the two instrument unrelated systems.
 
 - **Labeled by `type`/`success` only — never by `audit.Event.Reason`.**
   Several `Reason` values exist specifically so two different situations

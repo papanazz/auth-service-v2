@@ -42,7 +42,18 @@ func New(
 		},
 	)
 
-	if err := redisotel.InstrumentTracing(client); err != nil {
+	// WithDBStatement(false): the tracing hook's default captures every
+	// command *argument*, not just the command name — for this client
+	// that means the raw email-verification token
+	// (platform/verification.RedisCache.StoreRawToken) and the raw
+	// access+refresh token pair cached for idempotent login replay
+	// (platform/idempotency.Store.Save) would otherwise appear verbatim
+	// in every trace shipped to Jaeger. Postgres's tracer
+	// (platform/postgres.New) is safe by default here — otelpgx only
+	// captures SQL bind values if WithIncludeQueryParameters is passed,
+	// which this codebase never does — so Redis needed the same
+	// treatment explicitly. See docs/tracing.md.
+	if err := redisotel.InstrumentTracing(client, redisotel.WithDBStatement(false)); err != nil {
 		return nil, err
 	}
 
