@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 
+	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
 
@@ -36,6 +38,10 @@ type RegisterService struct {
 	passwordPolicy password.Policy
 
 	audit audit.Publisher
+
+	attemptTracker auth.AttemptTracker
+
+	policy SecurityPolicy
 }
 
 func NewService(
@@ -48,6 +54,10 @@ func NewService(
 
 	audit audit.Publisher,
 
+	attemptTracker auth.AttemptTracker,
+
+	policy SecurityPolicy,
+
 ) *RegisterService {
 
 	return &RegisterService{
@@ -59,6 +69,10 @@ func NewService(
 		passwordPolicy: passwordPolicy,
 
 		audit: audit,
+
+		attemptTracker: attemptTracker,
+
+		policy: policy,
 	}
 
 }
@@ -92,7 +106,53 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 2. Enforce password policy
+	// 2. Rate limit check
+	//
+	// Every attempt counts toward the limit, not just failures — unlike
+	// login's credential-based limiter (which only counts wrong-password
+	// guesses), the threat register defends against is volume from one
+	// source: mass account creation and email-enumeration probing both
+	// generate many attempts regardless of whether any individual one
+	// succeeds. So the counter is incremented unconditionally below,
+	// right after the cheap format checks and before anything that
+	// touches the database.
+	//
+
+	allowed, err :=
+		s.attemptTracker.Check(
+			ctx,
+			authattempt.RegisterIP(
+				cmd.IPAddress,
+			),
+			s.policy.IP,
+		)
+
+	if err != nil {
+
+		return nil, err
+	}
+
+	if !allowed {
+
+		return nil,
+			errs.ErrTooManyRequests
+	}
+
+	// RecordFailure is, under the hood, just "increment the sliding window
+	// counter" — the name reflects login's only current use (count
+	// wrong-password guesses), not a hard requirement that the call
+	// represents a failure.
+	_ =
+		s.attemptTracker.RecordFailure(
+			ctx,
+			authattempt.RegisterIP(
+				cmd.IPAddress,
+			),
+			s.policy.IP,
+		)
+
+	//
+	// 3. Enforce password policy
 	//
 
 	if err :=
@@ -105,7 +165,7 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 3. Reject a duplicate account
+	// 4. Reject a duplicate account
 	//
 	// Racy against a concurrent registration for the same email — the
 	// database's unique constraint is the real guarantee. This check exists
@@ -113,11 +173,10 @@ func (s *RegisterService) Handle(
 	// raw constraint-violation error.
 	//
 
-	_, err :=
-		s.userRepository.FindByEmail(
-			ctx,
-			email,
-		)
+	_, err = s.userRepository.FindByEmail(
+		ctx,
+		email,
+	)
 
 	switch {
 
@@ -140,7 +199,7 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 4. Hash the password and persist the account
+	// 5. Hash the password and persist the account
 	//
 
 	hash, err :=
@@ -165,7 +224,7 @@ func (s *RegisterService) Handle(
 	// verification token, no delivery mechanism, and no endpoint to
 	// complete it — so activate the account immediately rather than
 	// stranding every new user in a state nothing can ever clear. See
-	// docs/register.txt.
+	// docs/register.md.
 	account.Status = user.StatusActive
 
 	err =
@@ -181,7 +240,7 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 5. Publish audit event
+	// 6. Publish audit event
 	//
 
 	_ =

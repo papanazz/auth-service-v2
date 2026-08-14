@@ -141,6 +141,9 @@ func New(
 	loginPolicy :=
 		newLoginSecurityPolicy(cfg)
 
+	registerPolicy :=
+		newRegisterSecurityPolicy(cfg)
+
 	attemptTracker :=
 		authattempt.NewRedisTracker(
 			redisClient.Client,
@@ -161,6 +164,8 @@ func New(
 			passwordHasher,
 			password.NewPolicy(),
 			auditPublisher,
+			attemptTracker,
+			registerPolicy,
 		)
 
 	loginService :=

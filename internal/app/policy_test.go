@@ -23,6 +23,9 @@ func testConfig() *config.Config {
 
 	cfg.Security.Login.Device.GracePeriod = 5 * time.Minute
 
+	cfg.Security.Register.IP.Limit = 5
+	cfg.Security.Register.IP.Window = 10 * time.Minute
+
 	return cfg
 }
 
@@ -116,6 +119,37 @@ func TestNewLoginSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
 				t.Errorf("%s = %v, want %v", tt.name, tt.got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewRegisterSecurityPolicy_WiresEveryField(t *testing.T) {
+
+	policy := newRegisterSecurityPolicy(testConfig())
+
+	if missing := zeroFields(
+		reflect.ValueOf(policy),
+		"",
+	); len(missing) > 0 {
+
+		t.Errorf(
+			"SecurityPolicy fields left unwired by newRegisterSecurityPolicy: %v",
+			missing,
+		)
+	}
+}
+
+func TestNewRegisterSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
+
+	cfg := testConfig()
+
+	policy := newRegisterSecurityPolicy(cfg)
+
+	if policy.IP.Limit != cfg.Security.Register.IP.Limit {
+		t.Errorf("IP limit = %v, want %v", policy.IP.Limit, cfg.Security.Register.IP.Limit)
+	}
+
+	if policy.IP.Window != cfg.Security.Register.IP.Window {
+		t.Errorf("IP window = %v, want %v", policy.IP.Window, cfg.Security.Register.IP.Window)
 	}
 }
 

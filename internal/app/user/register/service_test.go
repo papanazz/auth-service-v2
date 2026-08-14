@@ -3,11 +3,14 @@ package register
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/security"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
@@ -88,9 +91,69 @@ func (m *mockAuditPublisher) Publish(ctx context.Context, event audit.Event) err
 	return nil
 }
 
+type mockAttemptTracker struct {
+	mu sync.Mutex
+
+	blocked bool
+
+	checkErr error
+
+	failures []string
+}
+
+func (m *mockAttemptTracker) Check(
+	ctx context.Context,
+	key string,
+	policy security.LimitPolicy,
+) (bool, error) {
+
+	if m.checkErr != nil {
+		return false, m.checkErr
+	}
+
+	return !m.blocked, nil
+}
+
+func (m *mockAttemptTracker) RecordFailure(
+	ctx context.Context,
+	key string,
+	policy security.LimitPolicy,
+) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.failures = append(m.failures, key)
+
+	return nil
+}
+
+func (m *mockAttemptTracker) Reset(
+	ctx context.Context,
+	key string,
+) error {
+
+	return nil
+}
+
 //
 // Tests
 //
+
+func testSecurityPolicy() SecurityPolicy {
+
+	return SecurityPolicy{
+
+		IP: security.LimitPolicy{
+
+			Type: security.PolicyRegisterAttempt,
+
+			Limit: 10,
+
+			Window: time.Minute,
+		},
+	}
+}
 
 func TestRegisterService_Handle(t *testing.T) {
 
@@ -244,6 +307,8 @@ func TestRegisterService_Handle(t *testing.T) {
 				tt.hasher,
 				tt.policy,
 				&mockAuditPublisher{},
+				&mockAttemptTracker{},
+				testSecurityPolicy(),
 			)
 
 			result, err := service.Handle(
@@ -290,6 +355,8 @@ func TestRegisterService_PersistsNormalizedAccount(t *testing.T) {
 		mockHasher{},
 		mockPolicy{},
 		&mockAuditPublisher{},
+		&mockAttemptTracker{},
+		testSecurityPolicy(),
 	)
 
 	const plaintext = "Str0ng!Passphrase"
@@ -348,6 +415,8 @@ func TestRegisterService_Handle_RecordsAuditTrail(t *testing.T) {
 		mockHasher{},
 		mockPolicy{},
 		auditPublisher,
+		&mockAttemptTracker{},
+		testSecurityPolicy(),
 	)
 
 	result, err := service.Handle(
@@ -410,6 +479,8 @@ func TestRegisterService_Handle_DoesNotAuditAFailedRegistration(t *testing.T) {
 		mockHasher{},
 		mockPolicy{},
 		auditPublisher,
+		&mockAttemptTracker{},
+		testSecurityPolicy(),
 	)
 
 	_, err := service.Handle(
@@ -427,4 +498,101 @@ func TestRegisterService_Handle_DoesNotAuditAFailedRegistration(t *testing.T) {
 	if len(auditPublisher.events) != 0 {
 		t.Errorf("audit events = %d, want 0 on a failed registration", len(auditPublisher.events))
 	}
+}
+
+func TestRegisterService_Handle_RateLimiting(t *testing.T) {
+
+	t.Run("rejects a request over the IP limit", func(t *testing.T) {
+
+		tracker := &mockAttemptTracker{blocked: true}
+
+		service := NewService(
+			&mockUserRepository{},
+			mockHasher{},
+			mockPolicy{},
+			&mockAuditPublisher{},
+			tracker,
+			testSecurityPolicy(),
+		)
+
+		result, err := service.Handle(
+			context.Background(),
+			Command{
+				Email:    "bayu@example.com",
+				Password: "Str0ng!Passphrase",
+			},
+		)
+
+		if !errors.Is(err, errs.ErrTooManyRequests) {
+			t.Fatalf("error = %v, want %v", err, errs.ErrTooManyRequests)
+		}
+
+		if result != nil {
+			t.Errorf("result = %+v, want nil on error", result)
+		}
+	})
+
+	t.Run("propagates a rate limiter failure", func(t *testing.T) {
+
+		tracker := &mockAttemptTracker{checkErr: errors.New("redis unreachable")}
+
+		service := NewService(
+			&mockUserRepository{},
+			mockHasher{},
+			mockPolicy{},
+			&mockAuditPublisher{},
+			tracker,
+			testSecurityPolicy(),
+		)
+
+		_, err := service.Handle(
+			context.Background(),
+			Command{
+				Email:    "bayu@example.com",
+				Password: "Str0ng!Passphrase",
+			},
+		)
+
+		if err == nil {
+			t.Fatal("expected an error when the rate limiter is unreachable")
+		}
+	})
+
+	// The counter must advance even when the attempt goes on to fail for an
+	// unrelated reason (weak password, duplicate email, ...) — an attacker
+	// probing many candidate emails, each rejected as already-registered,
+	// is exactly the pattern this limiter exists to cap.
+	t.Run("counts an attempt that fails validation afterward", func(t *testing.T) {
+
+		tracker := &mockAttemptTracker{}
+
+		service := NewService(
+			&mockUserRepository{
+				findByEmail: func(ctx context.Context, email string) (*user.User, error) {
+					return &user.User{ID: uuid.New(), Email: email}, nil
+				},
+			},
+			mockHasher{},
+			mockPolicy{},
+			&mockAuditPublisher{},
+			tracker,
+			testSecurityPolicy(),
+		)
+
+		_, err := service.Handle(
+			context.Background(),
+			Command{
+				Email:    "taken@example.com",
+				Password: "Str0ng!Passphrase",
+			},
+		)
+
+		if !errors.Is(err, errs.ErrUserAlreadyExists) {
+			t.Fatalf("error = %v, want %v", err, errs.ErrUserAlreadyExists)
+		}
+
+		if len(tracker.failures) != 1 {
+			t.Errorf("rate limit counter incremented %d times, want 1", len(tracker.failures))
+		}
+	})
 }

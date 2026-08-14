@@ -69,6 +69,7 @@ type SecurityConfig struct {
 	RefreshToken RefreshTokenConfig
 	Session      SessionConfig
 	Login        LoginSecurityConfig
+	Register     RegisterSecurityConfig
 }
 
 type JWTConfig struct {
@@ -116,6 +117,20 @@ type LoginEmailConfig struct {
 // more likely a bug or an attacker than a retry.
 type LoginDeviceConfig struct {
 	GracePeriod time.Duration `env:"LOGIN_DEVICE_GRACE_PERIOD" envDefault:"5m"`
+}
+
+type RegisterSecurityConfig struct {
+	IP RegisterIPConfig
+}
+
+// RegisterIPConfig caps how many registrations a single IP may attempt in
+// the window, regardless of outcome — a validation failure or a duplicate
+// email still counts, since both are exactly what an account-creation or
+// email-enumeration bot generates in bulk. Tighter than login's IP limit:
+// registration is a rarer legitimate action per IP than login is.
+type RegisterIPConfig struct {
+	Limit  int           `env:"REGISTER_IP_LIMIT" envDefault:"5"`
+	Window time.Duration `env:"REGISTER_IP_WINDOW" envDefault:"10m"`
 }
 
 // IdempotencyConfig bounds how long a cached response stays replayable for

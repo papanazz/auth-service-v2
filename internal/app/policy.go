@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
+	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 	"github.com/papanazz/auth-service-v2/internal/domain/security"
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
 )
@@ -43,5 +44,25 @@ func newLoginSecurityPolicy(
 		SessionTTL: cfg.Security.Session.TTL,
 
 		DeviceGracePeriod: cfg.Security.Login.Device.GracePeriod,
+	}
+}
+
+// newRegisterSecurityPolicy translates configuration into the register use
+// case's security policy. Kept apart from New for the same reason
+// newLoginSecurityPolicy is — see its comment.
+func newRegisterSecurityPolicy(
+	cfg *config.Config,
+) register.SecurityPolicy {
+
+	return register.SecurityPolicy{
+
+		IP: security.LimitPolicy{
+
+			Type: security.PolicyRegisterAttempt,
+
+			Limit: cfg.Security.Register.IP.Limit,
+
+			Window: cfg.Security.Register.IP.Window,
+		},
 	}
 }

@@ -10,6 +10,8 @@ const (
 	PolicyRefreshToken PolicyType = "REFRESH_TOKEN"
 
 	PolicyAPIRateLimit PolicyType = "API_RATE_LIMIT"
+
+	PolicyRegisterAttempt PolicyType = "REGISTER_ATTEMPT"
 )
 
 type LimitPolicy struct {
