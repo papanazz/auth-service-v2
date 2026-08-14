@@ -16,6 +16,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Redis         RedisConfig
 	Security      SecurityConfig
+	Idempotency   IdempotencyConfig
 	Observability ObservabilityConfig
 }
 
@@ -117,6 +118,14 @@ type LoginDeviceConfig struct {
 	GracePeriod time.Duration `env:"LOGIN_DEVICE_GRACE_PERIOD" envDefault:"5m"`
 }
 
+// IdempotencyConfig bounds how long a cached response stays replayable for
+// a given Idempotency-Key. Long enough to cover a client's retry window
+// after a dropped connection, short enough that the header can't be reused
+// to relive an old request indefinitely.
+type IdempotencyConfig struct {
+	TTL time.Duration `env:"IDEMPOTENCY_KEY_TTL" envDefault:"10m"`
+}
+
 type ObservabilityConfig struct {
 	OTLPExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4317"`
 }
@@ -164,6 +173,10 @@ func (c *Config) Validate() error {
 
 	if c.Security.Login.Device.GracePeriod < 0 {
 		return errors.New("LOGIN_DEVICE_GRACE_PERIOD must not be negative")
+	}
+
+	if c.Idempotency.TTL <= 0 {
+		return errors.New("IDEMPOTENCY_KEY_TTL must be positive")
 	}
 
 	// A refresh token is only honoured while its session is still active, so a

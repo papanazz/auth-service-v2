@@ -50,7 +50,12 @@ func NewRouter(
 
 	authHandler := handler.NewAuthHandler(application.Logger, application.LoginService)
 
-	r.Post(
+	r.With(
+		middleware.Idempotency(
+			application.IdempotencyStore,
+			application.Config.Idempotency.TTL,
+		),
+	).Post(
 		"/v1/auth/login",
 		authHandler.Login,
 	)

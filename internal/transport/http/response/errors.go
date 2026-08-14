@@ -49,7 +49,9 @@ func WriteError(
 
 			status = http.StatusTooManyRequests
 
-		case errs.CodeDeviceSessionActive:
+		case errs.CodeDeviceSessionActive,
+			errs.CodeIdempotencyKeyInProgress,
+			errs.CodeIdempotencyKeyConflict:
 
 			status = http.StatusConflict
 		}

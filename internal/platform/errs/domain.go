@@ -50,4 +50,14 @@ var (
 		CodeDeviceSessionActive,
 		"an active session already exists for this device",
 	)
+
+	ErrIdempotencyKeyInProgress = New(
+		CodeIdempotencyKeyInProgress,
+		"a request with this idempotency key is still being processed",
+	)
+
+	ErrIdempotencyKeyConflict = New(
+		CodeIdempotencyKeyConflict,
+		"this idempotency key was already used with a different request body",
+	)
 )

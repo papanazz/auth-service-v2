@@ -28,4 +28,8 @@ const (
 	CodeRefreshTokenReplay Code = "AUTH_REFRESH_TOKEN_REPLAY"
 
 	CodeDeviceSessionActive Code = "DEVICE_SESSION_ALREADY_ACTIVE"
+
+	CodeIdempotencyKeyInProgress Code = "IDEMPOTENCY_KEY_IN_PROGRESS"
+
+	CodeIdempotencyKeyConflict Code = "IDEMPOTENCY_KEY_CONFLICT"
 )

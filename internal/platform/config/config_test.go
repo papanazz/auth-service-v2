@@ -20,6 +20,8 @@ func validConfig() *Config {
 	cfg.Security.RefreshToken.TTL = 720 * time.Hour
 	cfg.Security.Session.TTL = 2160 * time.Hour
 
+	cfg.Idempotency.TTL = 10 * time.Minute
+
 	return cfg
 }
 
@@ -109,6 +111,31 @@ func TestConfig_Validate(t *testing.T) {
 			},
 
 			wantErr: "JWT_TTL",
+		},
+		{
+			name: "rejects a negative device login grace period",
+
+			mutate: func(c *Config) {
+				c.Security.Login.Device.GracePeriod = -time.Second
+			},
+
+			wantErr: "LOGIN_DEVICE_GRACE_PERIOD",
+		},
+		{
+			name: "accepts a zero device login grace period",
+
+			mutate: func(c *Config) {
+				c.Security.Login.Device.GracePeriod = 0
+			},
+		},
+		{
+			name: "rejects a non-positive idempotency key TTL",
+
+			mutate: func(c *Config) {
+				c.Idempotency.TTL = 0
+			},
+
+			wantErr: "IDEMPOTENCY_KEY_TTL must be positive",
 		},
 	}
 

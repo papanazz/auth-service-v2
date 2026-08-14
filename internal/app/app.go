@@ -13,6 +13,7 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
+	"github.com/papanazz/auth-service-v2/internal/platform/idempotency"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/platform/metrics"
 	"github.com/papanazz/auth-service-v2/internal/platform/token"
@@ -47,6 +48,8 @@ type Application struct {
 	RefreshService *refresh.Service
 
 	LogoutService *logout.Service
+
+	IdempotencyStore *idempotency.Store
 }
 
 func New(
@@ -143,6 +146,11 @@ func New(
 			redisClient.Client,
 		)
 
+	idempotencyStore :=
+		idempotency.NewStore(
+			redisClient.Client,
+		)
+
 	// =========================
 	// Application services
 	// =========================
@@ -220,6 +228,8 @@ func New(
 		RefreshService: refreshService,
 
 		LogoutService: logoutService,
+
+		IdempotencyStore: idempotencyStore,
 	}, nil
 
 }
