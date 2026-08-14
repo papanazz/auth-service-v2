@@ -59,6 +59,10 @@ func (h *LogoutHandler) Handle(
 			logout.Command{
 
 				RefreshToken: req.RefreshToken,
+
+				IPAddress: r.RemoteAddr,
+
+				UserAgent: r.UserAgent(),
 			},
 		)
 

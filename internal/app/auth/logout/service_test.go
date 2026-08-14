@@ -3,6 +3,7 @@ package logout
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
@@ -42,6 +43,107 @@ func TestService_Handle_Success(t *testing.T) {
 
 	if got := h.audit.countOf(audit.EventLogout, true); got != 1 {
 		t.Errorf("successful LOGOUT audit events = %d, want 1", got)
+	}
+}
+
+// The audit trail must carry the same client context login/refresh's does,
+// and the right session/user — not attributed to the wrong identifier the
+// way refresh's once was (see docs/refresh.txt).
+func TestService_Handle_AuditEventCarriesContext(t *testing.T) {
+
+	h := newHarness()
+
+	err := h.service().Handle(
+		context.Background(),
+		Command{
+			RefreshToken: h.rawToken,
+			IPAddress:    "203.0.113.10",
+			UserAgent:    "Mozilla/5.0",
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(h.audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(h.audit.events))
+	}
+
+	event := h.audit.events[0]
+
+	if event.UserID == nil || *event.UserID != h.session.UserID {
+		t.Errorf("event user ID = %v, want %v", event.UserID, h.session.UserID)
+	}
+
+	if event.SessionID == nil || *event.SessionID != h.session.ID {
+		t.Errorf("event session ID = %v, want %v", event.SessionID, h.session.ID)
+	}
+
+	if event.IPAddress != "203.0.113.10" {
+		t.Errorf("event IP = %q, want %q", event.IPAddress, "203.0.113.10")
+	}
+
+	if event.UserAgent != "Mozilla/5.0" {
+		t.Errorf("event user agent = %q, want %q", event.UserAgent, "Mozilla/5.0")
+	}
+}
+
+// The centerpiece: N clients racing to log out the same session at once —
+// e.g. multiple tabs, or a client retrying after a timeout. Every caller
+// must succeed; logout is a destructive, idempotent operation, so unlike
+// refresh there is no "exactly one winner" — everyone gets the end state
+// they asked for.
+func TestService_Handle_ConcurrentLogoutsAllSucceed(t *testing.T) {
+
+	const clients = 20
+
+	h := newHarness()
+
+	service := h.service()
+
+	var (
+		wg sync.WaitGroup
+
+		mu sync.Mutex
+
+		failures []error
+	)
+
+	start := make(chan struct{})
+
+	for i := 0; i < clients; i++ {
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			<-start
+
+			err := service.Handle(
+				context.Background(),
+				Command{RefreshToken: h.rawToken},
+			)
+
+			if err != nil {
+
+				mu.Lock()
+				failures = append(failures, err)
+				mu.Unlock()
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	if len(failures) != 0 {
+		t.Fatalf("%d/%d concurrent logouts failed: %v", len(failures), clients, failures)
+	}
+
+	if got := h.audit.countOf(audit.EventLogout, true); got != clients {
+		t.Errorf("successful LOGOUT audit events = %d, want %d — every caller succeeded", got, clients)
 	}
 }
 

@@ -9,37 +9,49 @@ import (
 func logoutSuccessEvent(
 	userID uuid.UUID,
 	sessionID uuid.UUID,
+	ip string,
+	userAgent string,
 ) audit.Event {
 
-	return audit.Event{
+	event :=
+		audit.New(
+			audit.EventLogout,
+		)
 
-		ID: uuid.New(),
+	event.UserID = &userID
 
-		Type: audit.EventLogout,
+	event.SessionID = &sessionID
 
-		UserID: &userID,
+	event.IPAddress = ip
 
-		SessionID: &sessionID,
+	event.UserAgent = userAgent
 
-		Success: true,
-	}
+	event.Success = true
+
+	return event
 }
 
 func logoutFailedEvent(
 	sessionID *uuid.UUID,
+	ip string,
+	userAgent string,
 	reason string,
 ) audit.Event {
 
-	return audit.Event{
+	event :=
+		audit.New(
+			audit.EventLogout,
+		)
 
-		ID: uuid.New(),
+	event.SessionID = sessionID
 
-		Type: audit.EventLogout,
+	event.IPAddress = ip
 
-		SessionID: sessionID,
+	event.UserAgent = userAgent
 
-		Success: false,
+	event.Success = false
 
-		Reason: &reason,
-	}
+	event.Reason = &reason
+
+	return event
 }
