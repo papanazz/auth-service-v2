@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,8 +28,17 @@ var errBackendDown = errors.New("connection refused")
 // The repositories below ignore the tx handle, so passing nil is safe and
 // keeps the mock honest about what it does: run the callback, surface errors.
 //
+// A real transaction serializes on Postgres's transaction-scoped advisory
+// lock (see LockDeviceSlot), so two concurrent transactions touching the same
+// device never interleave their reads and writes. This mock over-approximates
+// that with a single mutex held for the whole callback — coarser than the
+// real per-key lock, but sufficient to test the login service's
+// decide-then-act sequence under real concurrency.
+//
 
 type mockTransactionManager struct {
+	mu sync.Mutex
+
 	err error
 
 	calls int
@@ -38,6 +48,9 @@ func (m *mockTransactionManager) WithinTransaction(
 	ctx context.Context,
 	fn func(tx pgx.Tx) error,
 ) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.calls++
 
@@ -112,6 +125,10 @@ type mockSessionRepository struct {
 	revokedReasons []session.RevokeReason
 
 	revokeErr error
+
+	lockDeviceErr error
+
+	lockDeviceCalls int
 }
 
 func newMockSessionRepository() *mockSessionRepository {
@@ -184,6 +201,25 @@ func (m *mockSessionRepository) FindActiveByUserAndDevice(
 	}
 
 	return nil, errs.ErrSessionNotFound
+}
+
+// LockDeviceSlot is a no-op here: real serialization for these tests comes
+// from mockTransactionManager holding its mutex for the whole transaction,
+// which is what the real advisory lock achieves in production. This just
+// tracks the call and lets tests inject a failure.
+func (m *mockSessionRepository) LockDeviceSlot(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) error {
+
+	m.lockDeviceCalls++
+
+	if m.lockDeviceErr != nil {
+		return m.lockDeviceErr
+	}
+
+	return nil
 }
 
 func (m *mockSessionRepository) Revoke(
@@ -302,6 +338,8 @@ func (m *mockRefreshRepository) WithTx(
 //
 
 type mockVerifier struct {
+	mu sync.Mutex
+
 	err error
 
 	// hashes seen, so a test can assert the dummy-hash enumeration defense ran
@@ -309,6 +347,9 @@ type mockVerifier struct {
 }
 
 func (m *mockVerifier) Verify(hash string, password string) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.seen = append(m.seen, hash)
 
@@ -320,6 +361,8 @@ func (m *mockVerifier) Verify(hash string, password string) error {
 //
 
 type mockAccessTokenService struct {
+	mu sync.Mutex
+
 	err error
 
 	claims []token.Claims
@@ -333,7 +376,9 @@ func (m *mockAccessTokenService) Generate(
 		return token.AccessToken{}, m.err
 	}
 
+	m.mu.Lock()
 	m.claims = append(m.claims, claims)
+	m.mu.Unlock()
 
 	now := time.Now()
 
@@ -378,6 +423,8 @@ func (mockRefreshHasher) Hash(value string) string {
 //
 
 type mockAuditPublisher struct {
+	mu sync.Mutex
+
 	events []audit.Event
 }
 
@@ -386,12 +433,18 @@ func (m *mockAuditPublisher) Publish(
 	event audit.Event,
 ) error {
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.events = append(m.events, event)
 
 	return nil
 }
 
 func (m *mockAuditPublisher) types() []audit.EventType {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	out := make([]audit.EventType, 0, len(m.events))
 
@@ -407,6 +460,8 @@ func (m *mockAuditPublisher) types() []audit.EventType {
 //
 
 type mockAttemptTracker struct {
+	mu sync.Mutex
+
 	// keys that are over the limit
 	blocked map[string]bool
 
@@ -434,6 +489,9 @@ func (m *mockAttemptTracker) Check(
 		return false, m.checkErr
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	return !m.blocked[key], nil
 }
 
@@ -442,6 +500,9 @@ func (m *mockAttemptTracker) RecordFailure(
 	key string,
 	policy security.LimitPolicy,
 ) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.failures = append(m.failures, key)
 
@@ -452,6 +513,9 @@ func (m *mockAttemptTracker) Reset(
 	ctx context.Context,
 	key string,
 ) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.resets = append(m.resets, key)
 

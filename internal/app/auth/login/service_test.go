@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -291,6 +292,92 @@ func TestLoginService_Handle_DifferentDeviceIsUnaffectedByExistingSession(t *tes
 
 	if len(h.sessions.revokedSessions) != 0 {
 		t.Errorf("revoked sessions = %v, want none", h.sessions.revokedSessions)
+	}
+}
+
+// The centerpiece: N clients racing to log in from the same device at once —
+// e.g. a flaky network causing rapid-fire retries. Before the device lock,
+// each transaction could read the same pre-existing session as
+// supersede-able and then race the others into uq_sessions_active_device,
+// surfacing as a raw 500. With the lock in place, transactions serialize on
+// the device slot: each one either creates the session or supersedes the
+// one immediately before it, and every caller gets a clean success.
+func TestLoginService_Handle_ConcurrentLoginsOnSameDeviceAllSucceed(t *testing.T) {
+
+	const clients = 16
+
+	h := newHarness()
+
+	h.activeAccount("bayu@example.com")
+
+	cmd := validCommand()
+
+	service := h.service()
+
+	var (
+		wg sync.WaitGroup
+
+		mu sync.Mutex
+
+		failures []error
+	)
+
+	start := make(chan struct{})
+
+	for i := 0; i < clients; i++ {
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			<-start
+
+			_, err := service.Handle(
+				context.Background(),
+				cmd,
+			)
+
+			if err != nil {
+
+				mu.Lock()
+				failures = append(failures, err)
+				mu.Unlock()
+			}
+		}()
+	}
+
+	close(start)
+
+	wg.Wait()
+
+	if len(failures) != 0 {
+		t.Fatalf("%d/%d concurrent logins failed: %v", len(failures), clients, failures)
+	}
+
+	if len(h.sessions.created) != clients {
+		t.Fatalf("created %d sessions, want %d", len(h.sessions.created), clients)
+	}
+
+	active := 0
+
+	for _, s := range h.sessions.stored {
+
+		if s.RevokedAt == nil {
+			active++
+		}
+	}
+
+	if active != 1 {
+		t.Errorf("active sessions after the race = %d, want exactly 1", active)
+	}
+
+	if len(h.sessions.revokedSessions) != clients-1 {
+		t.Errorf("revoked sessions = %d, want %d", len(h.sessions.revokedSessions), clients-1)
+	}
+
+	if h.sessions.lockDeviceCalls != clients {
+		t.Errorf("device lock acquired %d times, want %d (once per transaction attempt)", h.sessions.lockDeviceCalls, clients)
 	}
 }
 

@@ -254,53 +254,6 @@ func (s *LoginService) Handle(
 			),
 		)
 
-	//
-	// A device may hold at most one active session (uq_sessions_active_device).
-	// A second login for the same device within the grace period is treated as
-	// the same client retrying — e.g. after a network timeout that lost the
-	// first response — so the stale session is superseded rather than left to
-	// collide with the new one. Past the grace period the existing session is
-	// left alone and the login is rejected: silently killing a session that has
-	// been active for a while looks more like a bug or an attacker than a retry.
-	//
-
-	existingSession, err :=
-		s.sessions.FindActiveByUserAndDevice(
-			ctx,
-			account.ID,
-			cmd.DeviceID,
-		)
-
-	if err != nil && !errors.Is(err, errs.ErrSessionNotFound) {
-
-		return nil, err
-	}
-
-	var supersedes *uuid.UUID
-
-	if existingSession != nil {
-
-		if time.Since(existingSession.CreatedAt) > s.policy.DeviceGracePeriod {
-
-			_ =
-				s.audit.Publish(
-					ctx,
-					loginFailedEvent(
-						&account.ID,
-						email,
-						cmd.IPAddress,
-						cmd.UserAgent,
-						errs.ErrDeviceSessionActive.Message,
-					),
-				)
-
-			return nil,
-				errs.ErrDeviceSessionActive
-		}
-
-		supersedes = &existingSession.ID
-	}
-
 	sessionID :=
 		uuid.New()
 
@@ -356,22 +309,66 @@ func (s *LoginService) Handle(
 						tx,
 					)
 
-				if supersedes != nil {
+				//
+				// A device may hold at most one active session
+				// (uq_sessions_active_device). The lock below serializes
+				// concurrent logins for this device so the read that follows
+				// cannot go stale before this transaction acts on it — without
+				// it, two concurrent retries could both see the same existing
+				// session as supersede-able and race each other into the
+				// unique constraint.
+				//
+				// A second login for the same device within the grace period
+				// is treated as the same client retrying — e.g. after a
+				// network timeout that lost the first response — so the
+				// stale session is superseded rather than left to collide
+				// with the new one. Past the grace period the existing
+				// session is left alone and the login is rejected: silently
+				// killing a session that has been active for a while looks
+				// more like a bug or an attacker than a retry.
+				//
 
-					err :=
+				if err :=
+					txSessionRepo.LockDeviceSlot(
+						ctx,
+						account.ID,
+						cmd.DeviceID,
+					); err != nil {
+
+					return err
+				}
+
+				existingSession, err :=
+					txSessionRepo.FindActiveByUserAndDevice(
+						ctx,
+						account.ID,
+						cmd.DeviceID,
+					)
+
+				if err != nil && !errors.Is(err, errs.ErrSessionNotFound) {
+
+					return err
+				}
+
+				if existingSession != nil {
+
+					if time.Since(existingSession.CreatedAt) > s.policy.DeviceGracePeriod {
+
+						return errs.ErrDeviceSessionActive
+					}
+
+					if err :=
 						txSessionRepo.Revoke(
 							ctx,
-							*supersedes,
+							existingSession.ID,
 							session.RevokeSessionSuperseded,
-						)
-
-					if err != nil {
+						); err != nil {
 
 						return err
 					}
 				}
 
-				err :=
+				err =
 					txSessionRepo.Create(
 						ctx,
 						session.Session{
@@ -441,6 +438,21 @@ func (s *LoginService) Handle(
 		)
 
 	if err != nil {
+
+		if errors.Is(err, errs.ErrDeviceSessionActive) {
+
+			_ =
+				s.audit.Publish(
+					ctx,
+					loginFailedEvent(
+						&account.ID,
+						email,
+						cmd.IPAddress,
+						cmd.UserAgent,
+						errs.ErrDeviceSessionActive.Message,
+					),
+				)
+		}
 
 		return nil, err
 	}

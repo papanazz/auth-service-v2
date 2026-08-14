@@ -268,6 +268,15 @@ func (m *mockSessionRepository) FindActiveByUserAndDevice(
 	return nil, errs.ErrSessionNotFound
 }
 
+func (m *mockSessionRepository) LockDeviceSlot(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) error {
+
+	return nil
+}
+
 func (m *mockSessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,

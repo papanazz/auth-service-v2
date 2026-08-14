@@ -241,6 +241,29 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 	return i, err
 }
 
+const lockDeviceSessionSlot = `-- name: LockDeviceSessionSlot :exec
+
+
+
+SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+`
+
+// =====================================================
+// Lock Device Session Slot
+// =====================================================
+//
+// A device may hold at most one active session (see
+// uq_sessions_active_device). This takes a transaction-scoped advisory lock
+// keyed by (user_id, device_id) so concurrent logins for the same device
+// serialize on the decide-then-act sequence (supersede vs. reject) instead
+// of racing each other into the unique constraint. Released automatically
+// at transaction end — no matching unlock call is needed.
+// =====================================================
+func (q *Queries) LockDeviceSessionSlot(ctx context.Context, hashtextextended string) error {
+	_, err := q.db.Exec(ctx, lockDeviceSessionSlot, hashtextextended)
+	return err
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 
 
@@ -249,7 +272,7 @@ UPDATE sessions
 
 SET
 
-    revoked_at = NOW(),
+    revoked_at = clock_timestamp(),
 
     revoked_reason = $2,
 
@@ -268,6 +291,14 @@ type RevokeSessionParams struct {
 // =====================================================
 // Revoke Session
 // =====================================================
+//
+// revoked_at uses clock_timestamp(), not NOW(): NOW() is fixed at
+// transaction start, but a session can be revoked by a transaction that
+// began before — and, thanks to LockDeviceSessionSlot, committed after — the
+// transaction that created it. With NOW() that ordering can write a
+// revoked_at earlier than the row's created_at and trip
+// sessions_revocation_check. clock_timestamp() reflects real execution time,
+// which the lock guarantees is after the creating transaction committed.
 func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
 	_, err := q.db.Exec(ctx, revokeSession, arg.ID, arg.RevokedReason)
 	return err

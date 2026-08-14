@@ -142,6 +142,18 @@ func (r *SessionRepository) FindActiveByUserAndDevice(
 	return mapSession(row), nil
 }
 
+func (r *SessionRepository) LockDeviceSlot(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) error {
+
+	return r.query.LockDeviceSessionSlot(
+		ctx,
+		userID.String()+":"+deviceID,
+	)
+}
+
 func (r *SessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,

@@ -39,6 +39,18 @@ type Repository interface {
 		error,
 	)
 
+	// LockDeviceSlot serializes concurrent logins for the same (user, device)
+	// pair for the lifetime of the current transaction, so a decide-then-act
+	// sequence built around FindActiveByUserAndDevice cannot race a concurrent
+	// login for the same device into the uq_sessions_active_device constraint.
+	// Must be called inside a transaction; the lock releases automatically
+	// when that transaction ends.
+	LockDeviceSlot(
+		ctx context.Context,
+		userID uuid.UUID,
+		deviceID string,
+	) error
+
 	Revoke(
 		ctx context.Context,
 		id uuid.UUID,
