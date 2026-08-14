@@ -86,6 +86,32 @@ func TestService_Handle_Success(t *testing.T) {
 	}
 }
 
+// Regression test: the access token minted on refresh must carry the real
+// session ID. It previously left SessionID unset, so every access token
+// issued via refresh carried a zeroed "sid" claim instead of the session's
+// actual ID.
+func TestService_Handle_AccessTokenCarriesSessionID(t *testing.T) {
+
+	h := newHarness()
+
+	if _, err := h.service().Handle(
+		context.Background(),
+		Command{RefreshToken: h.rawToken},
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(h.accessTokens.claims) != 1 {
+		t.Fatalf("access token generated %d times, want 1", len(h.accessTokens.claims))
+	}
+
+	got := h.accessTokens.claims[0].SessionID
+
+	if got != h.session.ID {
+		t.Errorf("access token SessionID = %v, want %v", got, h.session.ID)
+	}
+}
+
 // Regression test for the reported outage: refresh returned
 // ErrInvalidRefreshToken for every request because the session carried a zero
 // ExpiresAt, which always compares as already past.

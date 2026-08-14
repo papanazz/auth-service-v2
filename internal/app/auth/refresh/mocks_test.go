@@ -301,7 +301,11 @@ func (m *mockSessionRepository) WithTx(
 //
 
 type mockAccessTokenService struct {
+	mu sync.Mutex
+
 	err error
+
+	claims []token.Claims
 }
 
 func (m *mockAccessTokenService) Generate(
@@ -311,6 +315,10 @@ func (m *mockAccessTokenService) Generate(
 	if m.err != nil {
 		return token.AccessToken{}, m.err
 	}
+
+	m.mu.Lock()
+	m.claims = append(m.claims, claims)
+	m.mu.Unlock()
 
 	now := time.Now()
 

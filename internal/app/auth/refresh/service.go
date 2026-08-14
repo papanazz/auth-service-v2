@@ -275,6 +275,8 @@ func (s *Service) Handle(
 			token.Claims{
 
 				UserID: sessionData.UserID,
+
+				SessionID: sessionData.ID,
 			},
 		)
 
