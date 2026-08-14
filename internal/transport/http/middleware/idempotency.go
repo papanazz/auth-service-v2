@@ -60,9 +60,14 @@ type IdempotencyStore interface {
 
 // Idempotency makes a POST endpoint safe to retry: a request replayed with
 // the same Idempotency-Key header gets back the exact response the first
-// attempt produced, without the handler running again. Requests without the
-// header are unaffected — the header is opt-in, matching how Stripe and AWS
-// treat it.
+// attempt produced, without the handler running again.
+//
+// required controls what happens when the header is absent. Stripe and AWS
+// treat it as opt-in because they have existing clients whose requests
+// predate the header; this service has no deployed clients yet, so every
+// client can be required to send one from day one instead of retrofitting
+// that requirement later. Pass false to fall back to opt-in behavior once
+// backward compatibility actually matters.
 //
 // Only successful and client-error responses are cached. A 5xx is released
 // instead, so a transient failure (a dependency blip, not the request
@@ -77,6 +82,7 @@ type IdempotencyStore interface {
 func Idempotency(
 	store IdempotencyStore,
 	ttl time.Duration,
+	required bool,
 ) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
@@ -87,6 +93,16 @@ func Idempotency(
 				clientKey := r.Header.Get(idempotencyHeader)
 
 				if clientKey == "" {
+
+					if required {
+
+						response.WriteError(
+							w,
+							errs.ErrIdempotencyKeyRequired,
+						)
+
+						return
+					}
 
 					next.ServeHTTP(w, r)
 

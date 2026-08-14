@@ -54,6 +54,7 @@ func NewRouter(
 		middleware.Idempotency(
 			application.IdempotencyStore,
 			application.Config.Idempotency.TTL,
+			true,
 		),
 	).Post(
 		"/v1/auth/login",

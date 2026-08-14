@@ -60,4 +60,9 @@ var (
 		CodeIdempotencyKeyConflict,
 		"this idempotency key was already used with a different request body",
 	)
+
+	ErrIdempotencyKeyRequired = New(
+		CodeIdempotencyKeyRequired,
+		"the Idempotency-Key header is required",
+	)
 )

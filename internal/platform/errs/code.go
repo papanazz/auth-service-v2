@@ -32,4 +32,6 @@ const (
 	CodeIdempotencyKeyInProgress Code = "IDEMPOTENCY_KEY_IN_PROGRESS"
 
 	CodeIdempotencyKeyConflict Code = "IDEMPOTENCY_KEY_CONFLICT"
+
+	CodeIdempotencyKeyRequired Code = "IDEMPOTENCY_KEY_REQUIRED"
 )

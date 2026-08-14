@@ -140,7 +140,7 @@ func doRequest(
 	return rec
 }
 
-func TestIdempotency_NoKeyPassesThrough(t *testing.T) {
+func TestIdempotency_NoKeyIsRejectedWhenRequired(t *testing.T) {
 
 	store := newFakeStore()
 
@@ -151,7 +151,33 @@ func TestIdempotency_NoKeyPassesThrough(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(handler), "", `{}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(handler), "", `{}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+
+	if !strings.Contains(rec.Body.String(), "IDEMPOTENCY_KEY_REQUIRED") {
+		t.Errorf("body = %q, want the IDEMPOTENCY_KEY_REQUIRED code", rec.Body.String())
+	}
+
+	if calls != 0 {
+		t.Errorf("handler called %d times, want 0 — a missing required key must not reach it", calls)
+	}
+}
+
+func TestIdempotency_NoKeyPassesThroughWhenNotRequired(t *testing.T) {
+
+	store := newFakeStore()
+
+	var calls int32
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := doRequest(t, Idempotency(store, time.Minute, false)(handler), "", `{}`)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
@@ -170,7 +196,7 @@ func TestIdempotency_FirstRequestExecutesAndCaches(t *testing.T) {
 
 	store := newFakeStore()
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(okHandler(`{"ok":true}`)), "key-1", `{"a":1}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(okHandler(`{"ok":true}`)), "key-1", `{"a":1}`)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -206,7 +232,7 @@ func TestIdempotency_ServerErrorIsNotCached(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"boom"}`))
 	})
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(handler), "key-1", `{}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(handler), "key-1", `{}`)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -225,7 +251,7 @@ func TestIdempotency_ReplaysACompletedRecordWithoutCallingTheHandler(t *testing.
 
 	store := newFakeStore()
 
-	handler := Idempotency(store, time.Minute)(okHandler(`{"ok":true}`))
+	handler := Idempotency(store, time.Minute, true)(okHandler(`{"ok":true}`))
 
 	first := doRequest(t, handler, "key-1", `{"a":1}`)
 
@@ -235,7 +261,7 @@ func TestIdempotency_ReplaysACompletedRecordWithoutCallingTheHandler(t *testing.
 
 	var calls int32
 
-	countingHandler := Idempotency(store, time.Minute)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	countingHandler := Idempotency(store, time.Minute, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(http.StatusTeapot)
 	}))
@@ -263,7 +289,7 @@ func TestIdempotency_SameKeyDifferentBodyIsAConflict(t *testing.T) {
 
 	store := newFakeStore()
 
-	handler := Idempotency(store, time.Minute)(okHandler(`{"ok":true}`))
+	handler := Idempotency(store, time.Minute, true)(okHandler(`{"ok":true}`))
 
 	if rec := doRequest(t, handler, "key-1", `{"a":1}`); rec.Code != http.StatusOK {
 		t.Fatalf("first request status = %d, want 200", rec.Code)
@@ -288,7 +314,7 @@ func TestIdempotency_StillInProgressAfterMaxWaitReturns409(t *testing.T) {
 	// original request.
 	store.records["idem:/v1/auth/login:key-1"] = &idempotency.Record{RequestHash: hashRequest([]byte(`{}`))}
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(okHandler(`{}`)), "key-1", `{}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(okHandler(`{}`)), "key-1", `{}`)
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
@@ -322,7 +348,7 @@ func TestIdempotency_WaiterPicksUpTheWinnersResultOnceItCompletes(t *testing.T) 
 		)
 	}()
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(okHandler(`{}`)), "key-1", `{}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(okHandler(`{}`)), "key-1", `{}`)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 once the winner's result appears", rec.Code)
@@ -346,7 +372,7 @@ func TestIdempotency_StoreErrorDegradesToUnprotectedExecution(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	rec := doRequest(t, Idempotency(store, time.Minute)(handler), "key-1", `{}`)
+	rec := doRequest(t, Idempotency(store, time.Minute, true)(handler), "key-1", `{}`)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200 — a store outage must not fail the request", rec.Code)
@@ -382,7 +408,7 @@ func TestIdempotency_ConcurrentIdenticalRequestsExecuteOnce(t *testing.T) {
 		_, _ = w.Write([]byte(`{"call":` + strconv.Itoa(int(n)) + `}`))
 	})
 
-	wrapped := Idempotency(store, time.Minute)(handler)
+	wrapped := Idempotency(store, time.Minute, true)(handler)
 
 	var (
 		wg sync.WaitGroup
