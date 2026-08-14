@@ -97,9 +97,9 @@ func (s *Service) Handle(
 	//
 	// 2. Resolve its owning session
 	//
-	// Only the session ID is known if this fails — see docs/refresh.txt's
-	// CROSS-CUTTING FIXES for why that distinction (never the user ID)
-	// matters for the audit trail.
+	// Only the session ID is known if this fails — see docs/refresh.md's
+	// Decisions for why that distinction (never the user ID) matters for
+	// the audit trail.
 	//
 
 	sessionData, err :=

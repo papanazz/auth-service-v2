@@ -9,8 +9,12 @@ login are separate steps; this endpoint returns no tokens.
 
 `internal/app/user/register/service.go` — `RegisterService.Handle`
 
-1. **Normalize and validate input.** Email is lowercased and trimmed.
-   `Validate()` (`validator.go`) rejects anything `net/mail` can't parse.
+1. **Normalize and validate input.** `user.NormalizeEmail()` lowercases
+   and trims the address, and — for a known provider (currently Gmail) —
+   collapses dots and a `+tag` in the local part to their canonical form.
+   Shared with login, so both endpoints agree on what "the same email"
+   means; see Decisions. `Validate()` (`validator.go`) then rejects
+   anything `net/mail` can't parse.
 
 2. **Rate limit check.** One Redis-backed window, per IP
    (`platform/authattempt`). Every attempt counts toward the limit, not
@@ -43,6 +47,21 @@ login are separate steps; this endpoint returns no tokens.
 
 ## Decisions
 
+- **Email canonicalization is per-domain, not universal.** Gmail
+  documents that dots in the local part are insignificant and that a
+  `+tag` is discarded on delivery, so `bayu.aditya@gmail.com`,
+  `bayuaditya@gmail.com`, and `bayuaditya+work@gmail.com` are the same
+  mailbox and are collapsed to one stored value
+  (`internal/domain/user/email.go`). This is deliberately *not* applied
+  to every domain: for most providers — and especially corporate domains
+  using a `first.last@company.com` convention — a dot is a real,
+  meaningful separator between two different mailboxes, not decoration.
+  Applying Gmail's rule universally would be a correctness bug (silently
+  merging distinct accounts), not a hardening. The rule table is keyed
+  by domain and documented as extend-by-verification: a new provider
+  only gets an entry once its own documentation confirms the
+  equivalence, not by assuming it matches Gmail's behavior.
+
 - **Accounts are created `ACTIVE`, not `PENDING`.** `user.New()` defaults
   to `PENDING`, and the domain model is clearly shaped for an email
   verification flow (`EmailVerifiedAt`, `VerifyEmail()`, the `PENDING`
@@ -71,7 +90,11 @@ login are separate steps; this endpoint returns no tokens.
 
 ## Capabilities
 
-- Case/whitespace-insensitive email normalization.
+- Case/whitespace-insensitive email normalization, plus provider-specific
+  canonicalization (currently Gmail/Googlemail: dots and `+tag` in the
+  local part collapse to one identity) — shared with login via
+  `user.NormalizeEmail()`, extensible to other providers by adding a
+  verified rule to the table in `internal/domain/user/email.go`.
 - Per-IP rate limiting on registration attempts
   (`REGISTER_IP_LIMIT`/`REGISTER_IP_WINDOW`).
 - Password policy enforcement (`platform/password.Policy`).
@@ -166,10 +189,36 @@ Unit — `internal/platform/authattempt/key_test.go`: two connections from
 the same client on different ephemeral ports produce the same rate-limit
 key for `RegisterIP`/`LoginIP`/`LoginCredential`.
 
+Unit — `internal/domain/user/email_test.go`
+(`go test ./internal/domain/user/... -race`):
+
+- lowercases and trims regardless of domain
+- Gmail: dots in the local part are insignificant, individually and
+  combined with a `+tag`; a dot inside the `+tag` doesn't leak into the
+  canonicalized local part
+- `googlemail.com` aliases to `gmail.com` under the same rules
+- a non-Gmail domain keeps both its dots and its `+tag` untouched — no
+  documented equivalence assumed
+- malformed input (no `@`) and the empty string pass through safely
+- nine different ways of writing the same Gmail mailbox all converge to
+  one canonical value
+- `NormalizeEmail` is idempotent (applying it to its own output is a
+  no-op) — matters because register normalizes on write and `user.New`
+  normalizes again inside `Create`
+
 e2e — against the real docker-compose stack:
 
 - `POST /v1/user/register` with a fresh email → 201, well-formed body
 - re-registering the same email → 409 `USER_ALREADY_EXISTS`
+- registered `bayu.aditya<n>+signup@gmail.com`; stored as
+  `bayuaditya<n>@gmail.com`; a plain-variant and a `+tag`-variant
+  re-registration attempt of the same mailbox both → 409
+  `USER_ALREADY_EXISTS`
+- registered with one Gmail variant, logged in successfully with a
+  different variant of the same mailbox → 200, proving register and
+  login agree on identity through the shared `NormalizeEmail`
+- `first.last@company.com` on a non-Gmail domain registers with its dot
+  intact (unaffected by the Gmail rule)
 - audit row created with `type=USER_REGISTERED`, `success=true`, correct
   email, IP, and user agent
 - rate limiting verified live at a temporarily lowered limit (3 per 30s):
@@ -187,6 +236,7 @@ internal/app/user/register/event.go                 USER_REGISTERED constructor
 internal/app/user/register/policy.go                SecurityPolicy
 internal/app/policy.go                               config -> SecurityPolicy
 internal/domain/user/user.go                         User entity, status lifecycle
+internal/domain/user/email.go                        NormalizeEmail, canonicalization rules
 internal/domain/user/repository.go                   Repository interface
 internal/domain/password/                            Hasher / Policy interfaces
 internal/platform/password/                          Argon2id, Policy implementations

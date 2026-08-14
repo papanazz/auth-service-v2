@@ -48,7 +48,7 @@ func TestService_Handle_Success(t *testing.T) {
 
 // The audit trail must carry the same client context login/refresh's does,
 // and the right session/user — not attributed to the wrong identifier the
-// way refresh's once was (see docs/refresh.txt).
+// way refresh's once was (see docs/refresh.md).
 func TestService_Handle_AuditEventCarriesContext(t *testing.T) {
 
 	h := newHarness()
