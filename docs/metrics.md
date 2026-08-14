@@ -4,92 +4,88 @@
 `deployments/prometheus` container every 15s. Unauthenticated (see Gaps).
 
 This is not a per-endpoint doc like `docs/login.md` — it's a cross-cutting
-review of what each of the six endpoints (`register`, `login`, `refresh`,
-`logout`, `verify-email`, `verify-email/resend`) needs observable, and why.
+look at what each of the six endpoints (`register`, `login`, `refresh`,
+`logout`, `verify-email`, `verify-email/resend`) needs observable, and
+why.
 
-## What Already Existed
+## Metrics
 
-`internal/transport/http/middleware/metrics.go` wraps every request:
+### `http_requests_total{method, path, status}`
 
-- `http_requests_total{method, path, status}` — a counter.
-- `http_request_duration_seconds{method, path}` — a histogram.
+Every request, counted by outcome. Since HTTP status is a label, this
+already breaks failures down by *category* wherever the status codes
+themselves differ — `docs/login.md`'s API Contract table maps `401`
+invalid credentials, `403` locked account, `409` device conflict, and
+`429` rate limited to distinct statuses on the same path, so all four
+are already independently visible here without any endpoint-specific
+instrumentation.
 
-This alone gives, per endpoint: request volume, latency, and — since HTTP
-status is a label — error rate broken down by *category* of failure
-where the status codes already differ (`docs/login.md`'s API Contract
-table: `401` invalid credentials, `403` locked, `409` device conflict,
-`429` rate limited, all distinct statuses on the same path). That
-coverage was correct and is left untouched.
+### `http_request_duration_seconds{method, path}`
 
-## What Was Missing, and What Was Added
+Latency histogram per endpoint.
 
-Two gaps survived that generic layer — one where two genuinely different
-situations collapse onto the *same* status code, and one where a whole
-dimension (which of several limiters fired) has no label at all.
+Both of the above are recorded generically by
+`internal/transport/http/middleware/metrics.go`, ahead of any
+routing to a specific handler — every endpoint gets them for free.
 
-### 1. `auth_events_total{type, success}`
+### `auth_events_total{type, success}`
 
-**The gap:** refresh has two distinct failure paths that both return
-`401`: an ordinary invalid/expired/unknown token
-(`AUTH_INVALID_REFRESH_TOKEN`), and a **replayed, already-consumed
-token** (`AUTH_REFRESH_TOKEN_REPLAY`) — deliberately mapped to the same
-HTTP status (`internal/transport/http/response/errors.go`'s comment:
-"returning 500 would both mislead the client and page an on-call
-engineer for what is a client-side event"). That's the right call for
-the *client-facing* status code, but it means `http_requests_total`
-alone cannot distinguish "a client retried a stale token" (routine, high
+Mirrors every `audit.Event` published anywhere in the app layer —
+`LOGIN_SUCCESS`/`LOGIN_FAILED`, `TOKEN_REFRESH`/`TOKEN_REFRESH_FAILED`/
+`TOKEN_REUSE_DETECTED`, `LOGOUT`, `USER_REGISTERED`, `EMAIL_VERIFIED`,
+`VERIFICATION_EMAIL_SENT` — through a decorator around the single
+`audit.Publisher` instance shared by all six use cases
+(`internal/platform/metrics.AuditPublisher`, composed once in
+`internal/app/app.go`). Every `Publish` call increments this counter
+before forwarding to the real (Postgres) publisher.
+
+The endpoint's own HTTP status usually already distinguishes success
+from failure, but refresh has one pair that deliberately does not:
+an ordinary invalid/expired/unknown token
+(`AUTH_INVALID_REFRESH_TOKEN`) and a **replayed, already-consumed
+token** (`AUTH_REFRESH_TOKEN_REPLAY`) both return `401` on purpose
+(`internal/transport/http/response/errors.go`'s comment: "returning
+500 would both mislead the client and page an on-call engineer for
+what is a client-side event"). That is the right call for the
+client-facing status code, but it also means `http_requests_total`
+alone cannot tell "a client retried a stale token" (routine, high
 volume) from "someone replayed a token that was already used" (the
-signature of a stolen refresh token — see `docs/refresh.md` flow step
-3). Before this change, noticing a real reuse event required querying
-the audit log in Postgres by hand; there was nothing to alert on.
+signature of a stolen refresh token — `docs/refresh.md` flow step 3).
+`auth_events_total{type="TOKEN_REUSE_DETECTED"}` is its own time
+series regardless, so
+`rate(auth_events_total{type="TOKEN_REUSE_DETECTED"}[5m]) > 0` is a
+real, pageable alert. Verified live: replaying a consumed refresh
+token shows `TOKEN_REUSE_DETECTED` as a series distinct from
+`TOKEN_REFRESH_FAILED`.
 
-**The fix:** every use case already publishes an `audit.Event` for its
-meaningful outcomes — `LOGIN_SUCCESS`/`LOGIN_FAILED`, `TOKEN_REFRESH`/
-`TOKEN_REFRESH_FAILED`/`TOKEN_REUSE_DETECTED`, `LOGOUT`,
-`USER_REGISTERED`, `EMAIL_VERIFIED`, `VERIFICATION_EMAIL_SENT` — through
-one shared `audit.Publisher` instance (`internal/app/app.go`). Rather
-than adding a metrics dependency to all six use-case constructors,
-`internal/platform/metrics.AuditPublisher` decorates that single
-instance: every `Publish` call increments `auth_events_total{type,
-success}` before forwarding to the real (Postgres) publisher, and
-nothing beyond `app.go`'s wiring changed. `TOKEN_REUSE_DETECTED` is now
-its own time series — `rate(auth_events_total{type="TOKEN_REUSE_DETECTED"}[5m])
-> 0` is a real, pageable alert. Verified live: replaying a consumed
-refresh token now shows `auth_events_total{type="TOKEN_REUSE_DETECTED",success="false"}`
-as a distinct series from `TOKEN_REFRESH_FAILED`.
+### `auth_rate_limit_rejections_total{limiter}`
 
-### 2. `auth_rate_limit_rejections_total{limiter}`
+Counts requests rejected by `authattempt.RedisTracker` — the sole
+implementation of `auth.AttemptTracker`, shared by register, login, and
+resend-verification — labeled by which of the four limiters tripped
+(`auth:register:ip`, `auth:login:ip`, `auth:login:credential`,
+`auth:resend-verification:ip`; see `internal/platform/authattempt/key.go`).
+The label is the rate-limit key's fixed prefix, never its identifying
+suffix (an IP address or a SHA-256 credential hash) — see Decisions.
 
-**The gap:** four independent rate limiters exist
-(`internal/platform/authattempt/key.go`): `auth:register:ip`,
-`auth:login:ip`, `auth:login:credential`, `auth:resend-verification:ip`.
-Login alone runs two of them behind the *same* endpoint and the *same*
-`429` — `http_requests_total{path="/v1/auth/login",status="429"}` cannot
+Login runs two of these limiters behind one endpoint and one `429`, so
+`http_requests_total{path="/v1/auth/login",status="429"}` alone cannot
 tell "one IP hammering many different accounts" (IP-scoped, looks like
-mass credential stuffing or a scanner) apart from "many attempts against
-one specific account" (credential-scoped, looks like a targeted attack
-on one user) — genuinely different incident response for the same
-number.
-
-**The fix:** `authattempt.RedisTracker` — the sole implementation of
-`auth.AttemptTracker`, shared by register/login/resend — increments
-`auth_rate_limit_rejections_total{limiter}` itself whenever `Check`
-returns not-allowed. The label is derived from the rate-limit key's
-fixed prefix (`auth:<endpoint>:<limiter>`), *never* the key's
-identifying suffix (an IP address or a SHA-256 credential hash) — see
-Decisions for why that boundary matters. Verified live: tripping the
-register-IP, login-credential, and resend-verification-IP limiters
-independently produced three distinct series — `auth:register:ip`,
-`auth:login:credential`, `auth:resend-verification:ip` — each with a
+mass credential stuffing or a scanner) apart from "many attempts
+against one specific account" (credential-scoped, looks like a
+targeted attack on one user) — a different incident either way, same
+number. `auth_rate_limit_rejections_total` splits them. Verified live:
+tripping the register-IP, login-credential, and resend-verification-IP
+limiters independently produced three distinct series, each with a
 plausible count, no IP address or hash anywhere in the label set.
 
 ## Per-Endpoint Coverage
 
-| Endpoint | Generic (pre-existing) | `auth_events_total` types | `auth_rate_limit_rejections_total` limiter |
+| Endpoint | Generic | `auth_events_total` types | `auth_rate_limit_rejections_total` limiter |
 |---|---|---|---|
 | `POST /v1/user/register` | requests, latency, status | `USER_REGISTERED` (success only — see Gaps) | `auth:register:ip` |
 | `POST /v1/auth/login` | requests, latency, status (401/403/409/429 already distinct) | `LOGIN_SUCCESS`, `LOGIN_FAILED` | `auth:login:ip`, `auth:login:credential` |
-| `POST /v1/auth/refresh` | requests, latency, status | `TOKEN_REFRESH`, `TOKEN_REFRESH_FAILED`, **`TOKEN_REUSE_DETECTED`** | none (deliberately unrated-limited — `docs/refresh.md` Decisions) |
+| `POST /v1/auth/refresh` | requests, latency, status | `TOKEN_REFRESH`, `TOKEN_REFRESH_FAILED`, **`TOKEN_REUSE_DETECTED`** | none (deliberately not rate-limited — `docs/refresh.md` Decisions) |
 | `POST /v1/auth/logout` | requests, latency, status | `LOGOUT` (success and failure both use this type; see `internal/app/auth/logout/event.go`) | none (deliberately, same doc) |
 | `POST /v1/user/verify-email` | requests, latency, status | `EMAIL_VERIFIED` (success only — see Gaps) | none (the token itself is the rate limit — see `docs/email-verification.md`) |
 | `POST /v1/user/verify-email/resend` | requests, latency, status | `VERIFICATION_EMAIL_SENT` (real sends only, not the no-op paths — deliberate, see `docs/email-verification.md` Decisions) | `auth:resend-verification:ip` |
@@ -100,12 +96,12 @@ plausible count, no IP address or hash anywhere in the label set.
   dependency added to six use-case constructors.** Every meaningful
   business outcome already flows through one `audit.Publish` call — the
   decorator is the one place that's true, so it's the one place metrics
-  needed to be added. The alternative (inject `*metrics.Metrics` into
+  need to be added. The alternative (inject `*metrics.Metrics` into
   `register.NewService`, `login.NewService`, ... individually) would
   mean six more constructor parameters and six more places to forget to
   wire one in — exactly the class of bug `internal/app/policy.go`'s
   `TestNew*SecurityPolicy_WiresEveryField` reflection tests exist to
-  catch for security policy fields. Zero use-case files changed for this
+  catch for security policy fields. No use-case file changes for this
   feature.
 
 - **Labeled by `type`/`success` only — never by `audit.Event.Reason`.**
@@ -142,28 +138,28 @@ plausible count, no IP address or hash anywhere in the label set.
   Postgres outage, not less, and consistent with every call site already
   treating `audit.Publish` as best-effort (`_ = s.audit.Publish(...)`).
 
-- **`RedisTracker` gained a `*metrics.Metrics` constructor argument
-  instead of being wrapped in a decorator like `audit.Publisher` was.**
-  Unlike `audit.Publisher`, `auth.AttemptTracker` has exactly one
-  production implementation and one construction site (`app.go`) — a
-  decorator would only add an indirection layer around a 1:1
-  relationship. Consistent, not dogmatic: use the pattern that fits each
-  case rather than picking one mechanism and forcing both fits.
+- **`RedisTracker` takes a `*metrics.Metrics` constructor argument
+  directly, rather than being wrapped in a decorator like
+  `audit.Publisher` is.** Unlike `audit.Publisher`, `auth.AttemptTracker`
+  has exactly one production implementation and one construction site
+  (`app.go`) — a decorator would only add an indirection layer around a
+  1:1 relationship. Consistent, not dogmatic: the pattern fits each case
+  rather than one mechanism being forced onto both.
 
 ## Capabilities
 
 - `TOKEN_REUSE_DETECTED` — the single highest-value security signal in
-  this service — is now its own alertable Prometheus series, not just an
-  audit-log row (see gap #1 above).
-- Every one of the six endpoints' meaningful outcomes is now visible in
-  `auth_events_total` with zero changes to any use-case's code.
+  this service — is its own alertable Prometheus series, not just an
+  audit-log row.
+- Every one of the six endpoints' meaningful outcomes is visible in
+  `auth_events_total`, with no metrics-specific code in any use case.
 - All four rate limiters are independently observable
   (`auth_rate_limit_rejections_total{limiter}`), letting an IP-scoped
   attack be told apart from a credential-scoped one on the same login
   endpoint.
-- Both new metrics are provably cardinality-bounded: `auth_events_total`
-  by the fixed, closed set of `audit.EventType` constants (12 today) ×
-  2 (`success`); `auth_rate_limit_rejections_total` by the fixed set of
+- Both metrics are provably cardinality-bounded: `auth_events_total` by
+  the fixed, closed set of `audit.EventType` constants (12 today) × 2
+  (`success`); `auth_rate_limit_rejections_total` by the fixed set of
   limiter key prefixes (4 today) — neither grows with traffic, user
   count, or IP diversity.
 
@@ -190,19 +186,24 @@ plausible count, no IP address or hash anywhere in the label set.
   ratio panel needs no new instrumentation), so this wasn't built as a
   separate counter — flagged here in case a dashboard ever wants it
   pre-computed server-side instead.
-- **No Grafana dashboard ships with these metrics yet** —
+- **No Grafana dashboard ships with these metrics** —
   `deployments/grafana/provisioning` only provisions the datasource, no
-  dashboards. The two new metric families are designed to be
-  dashboard-ready (bounded labels, meaningful names) but none exists in
-  this repo today.
+  dashboards. Both metric families are dashboard-ready (bounded labels,
+  meaningful names) but none exists in this repo today.
 
-## Exposition
+## API Contract
+
+**Request**
 
 ```
 GET /metrics
 ```
 
-Prometheus text exposition format. Relevant excerpt (after triggering a
+No authentication required (see Gaps).
+
+**Success — `200 OK`**
+
+Prometheus text exposition format. Relevant excerpt (after a
 registration, a login, a login failure, and a rate-limit trip):
 
 ```
@@ -216,8 +217,6 @@ auth_events_total{success="true",type="USER_REGISTERED"} 1
 # TYPE auth_rate_limit_rejections_total counter
 auth_rate_limit_rejections_total{limiter="auth:register:ip"} 3
 ```
-
-No authentication required (see Gaps).
 
 ## Tested Scenarios
 
@@ -257,8 +256,8 @@ e2e — against the real docker-compose stack:
   label set
 - rotated a refresh token once (success), then replayed the same
   now-consumed token: `/metrics` showed `TOKEN_REUSE_DETECTED` as its
-  own series, distinct from `TOKEN_REFRESH_FAILED` — the specific gap
-  this feature exists to close
+  own series, distinct from `TOKEN_REFRESH_FAILED` — exactly the
+  distinction this metric exists to make
 
 ## Related Files
 
@@ -267,7 +266,7 @@ internal/platform/metrics/metrics.go          Metrics struct, registration
 internal/platform/metrics/audit_publisher.go   AuditPublisher decorator
 internal/platform/authattempt/service.go       RedisTracker, limiterFromKey
 internal/platform/authattempt/key.go           the four rate-limit key constructors
-internal/transport/http/middleware/metrics.go  pre-existing generic HTTP metrics
+internal/transport/http/middleware/metrics.go  generic HTTP metrics
 internal/domain/audit/event.go                 EventType constants, Event struct
 internal/app/app.go                            wiring: both decorators composed once
 deployments/prometheus/prometheus.yml          scrape config
