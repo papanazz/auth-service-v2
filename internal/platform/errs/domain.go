@@ -45,4 +45,9 @@ var (
 		CodeTooManyRequest,
 		"too many requests",
 	)
+
+	ErrDeviceSessionActive = New(
+		CodeDeviceSessionActive,
+		"an active session already exists for this device",
+	)
 )

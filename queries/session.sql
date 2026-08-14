@@ -90,6 +90,32 @@ LIMIT 1;
 
 
 -- =====================================================
+-- Find Active Session By User And Device
+-- =====================================================
+--
+-- Backs the partial unique index uq_sessions_active_device: a user may
+-- have at most one active session per device_id. Used by login to detect
+-- a device already holding an active session before creating a new one.
+-- =====================================================
+
+
+-- name: GetActiveSessionByUserAndDevice :one
+
+SELECT *
+
+FROM sessions
+
+WHERE user_id = $1
+
+AND device_id = $2
+
+AND revoked_at IS NULL
+
+LIMIT 1;
+
+
+
+-- =====================================================
 -- Revoke Session
 -- =====================================================
 

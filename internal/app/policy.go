@@ -41,5 +41,7 @@ func newLoginSecurityPolicy(
 		RefreshTokenTTL: cfg.Security.RefreshToken.TTL,
 
 		SessionTTL: cfg.Security.Session.TTL,
+
+		DeviceGracePeriod: cfg.Security.Login.Device.GracePeriod,
 	}
 }

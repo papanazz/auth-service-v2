@@ -103,7 +103,15 @@ type mockSessionRepository struct {
 
 	findErr error
 
+	findActiveByDeviceErr error
+
 	lastRefreshedCalls []uuid.UUID
+
+	revokedSessions []uuid.UUID
+
+	revokedReasons []session.RevokeReason
+
+	revokeErr error
 }
 
 func newMockSessionRepository() *mockSessionRepository {
@@ -155,11 +163,51 @@ func (m *mockSessionRepository) FindActiveByID(
 	return m.FindByID(ctx, id)
 }
 
+func (m *mockSessionRepository) FindActiveByUserAndDevice(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) (*session.Session, error) {
+
+	if m.findActiveByDeviceErr != nil {
+		return nil, m.findActiveByDeviceErr
+	}
+
+	for _, s := range m.stored {
+
+		if s.UserID == userID &&
+			s.DeviceID == deviceID &&
+			s.RevokedAt == nil {
+
+			return s, nil
+		}
+	}
+
+	return nil, errs.ErrSessionNotFound
+}
+
 func (m *mockSessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,
 	reason session.RevokeReason,
 ) error {
+
+	if m.revokeErr != nil {
+		return m.revokeErr
+	}
+
+	m.revokedSessions = append(m.revokedSessions, id)
+
+	m.revokedReasons = append(m.revokedReasons, reason)
+
+	if found, ok := m.stored[id]; ok && found.RevokedAt == nil {
+
+		now := time.Now()
+
+		found.RevokedAt = &now
+
+		found.RevokedReason = &reason
+	}
 
 	return nil
 }
@@ -473,6 +521,8 @@ func newHarness() *harness {
 			RefreshTokenTTL: 30 * 24 * time.Hour,
 
 			SessionTTL: 90 * 24 * time.Hour,
+
+			DeviceGracePeriod: 5 * time.Minute,
 		},
 	}
 }
@@ -507,4 +557,30 @@ func (h *harness) activeAccount(email string) *user.User {
 	h.users.account = account
 
 	return account
+}
+
+// activeSessionForDevice seeds an already-active session for the given
+// account/device, created at createdAt, so device-collision tests can
+// exercise the supersede/reject fork without going through a real login.
+func (h *harness) activeSessionForDevice(
+	userID uuid.UUID,
+	deviceID string,
+	createdAt time.Time,
+) *session.Session {
+
+	existing := &session.Session{
+		ID: uuid.New(),
+
+		UserID: userID,
+
+		DeviceID: deviceID,
+
+		ExpiresAt: createdAt.Add(90 * 24 * time.Hour),
+
+		CreatedAt: createdAt,
+	}
+
+	h.sessions.stored[existing.ID] = existing
+
+	return existing
 }

@@ -2,6 +2,7 @@ package login
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -253,6 +254,53 @@ func (s *LoginService) Handle(
 			),
 		)
 
+	//
+	// A device may hold at most one active session (uq_sessions_active_device).
+	// A second login for the same device within the grace period is treated as
+	// the same client retrying — e.g. after a network timeout that lost the
+	// first response — so the stale session is superseded rather than left to
+	// collide with the new one. Past the grace period the existing session is
+	// left alone and the login is rejected: silently killing a session that has
+	// been active for a while looks more like a bug or an attacker than a retry.
+	//
+
+	existingSession, err :=
+		s.sessions.FindActiveByUserAndDevice(
+			ctx,
+			account.ID,
+			cmd.DeviceID,
+		)
+
+	if err != nil && !errors.Is(err, errs.ErrSessionNotFound) {
+
+		return nil, err
+	}
+
+	var supersedes *uuid.UUID
+
+	if existingSession != nil {
+
+		if time.Since(existingSession.CreatedAt) > s.policy.DeviceGracePeriod {
+
+			_ =
+				s.audit.Publish(
+					ctx,
+					loginFailedEvent(
+						&account.ID,
+						email,
+						cmd.IPAddress,
+						cmd.UserAgent,
+						errs.ErrDeviceSessionActive.Message,
+					),
+				)
+
+			return nil,
+				errs.ErrDeviceSessionActive
+		}
+
+		supersedes = &existingSession.ID
+	}
+
 	sessionID :=
 		uuid.New()
 
@@ -307,6 +355,21 @@ func (s *LoginService) Handle(
 					s.sessions.WithTx(
 						tx,
 					)
+
+				if supersedes != nil {
+
+					err :=
+						txSessionRepo.Revoke(
+							ctx,
+							*supersedes,
+							session.RevokeSessionSuperseded,
+						)
+
+					if err != nil {
+
+						return err
+					}
+				}
 
 				err :=
 					txSessionRepo.Create(

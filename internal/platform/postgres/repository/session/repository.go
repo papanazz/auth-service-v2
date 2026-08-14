@@ -105,6 +105,43 @@ func (r *SessionRepository) FindActiveByID(
 	return mapSession(row), nil
 }
 
+func (r *SessionRepository) FindActiveByUserAndDevice(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) (
+	*domain.Session,
+	error,
+) {
+
+	row, err :=
+		r.query.GetActiveSessionByUserAndDevice(
+			ctx,
+			sqlc.GetActiveSessionByUserAndDeviceParams{
+
+				UserID: userID,
+
+				DeviceID: deviceID,
+			},
+		)
+
+	if err != nil {
+
+		if errors.Is(
+			err,
+			sql.ErrNoRows,
+		) {
+
+			return nil,
+				errs.ErrSessionNotFound
+		}
+
+		return nil, err
+	}
+
+	return mapSession(row), nil
+}
+
 func (r *SessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,

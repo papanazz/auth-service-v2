@@ -21,6 +21,11 @@ const (
 	RevokePasswordChanged    RevokeReason = "PASSWORD_CHANGED"
 	RevokeAdminAction        RevokeReason = "ADMIN_ACTION"
 	RevokeTokenReuseDetected RevokeReason = "TOKEN_REUSE_DETECTED"
+
+	// RevokeSessionSuperseded marks a session killed by a fresh login from the
+	// same device within the login grace period — treated as the same client
+	// retrying (e.g. after a network timeout) rather than a new session.
+	RevokeSessionSuperseded RevokeReason = "SESSION_SUPERSEDED"
 )
 
 type Session struct {

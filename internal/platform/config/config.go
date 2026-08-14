@@ -89,8 +89,9 @@ type SessionConfig struct {
 }
 
 type LoginSecurityConfig struct {
-	IP    LoginIPConfig
-	Email LoginEmailConfig
+	IP     LoginIPConfig
+	Email  LoginEmailConfig
+	Device LoginDeviceConfig
 }
 
 type LoginIPConfig struct {
@@ -101,6 +102,19 @@ type LoginIPConfig struct {
 type LoginEmailConfig struct {
 	Limit  int           `env:"LOGIN_EMAIL_LIMIT" envDefault:"5"`
 	Window time.Duration `env:"LOGIN_EMAIL_WINDOW" envDefault:"15m"`
+}
+
+// LoginDeviceConfig bounds how a login is treated when the same device
+// already holds an active session.
+//
+// Within GracePeriod of that session's creation, a new login is assumed to
+// be the same client retrying (e.g. after a network timeout) rather than a
+// second, competing login: the stale session is superseded and the new
+// login proceeds. Past the grace period, the new login is rejected instead
+// of silently killing a session that has been active for a while — that is
+// more likely a bug or an attacker than a retry.
+type LoginDeviceConfig struct {
+	GracePeriod time.Duration `env:"LOGIN_DEVICE_GRACE_PERIOD" envDefault:"5m"`
 }
 
 type ObservabilityConfig struct {
@@ -146,6 +160,10 @@ func (c *Config) Validate() error {
 
 	if c.Security.Session.TTL <= 0 {
 		return errors.New("SESSION_TTL must be positive")
+	}
+
+	if c.Security.Login.Device.GracePeriod < 0 {
+		return errors.New("LOGIN_DEVICE_GRACE_PERIOD must not be negative")
 	}
 
 	// A refresh token is only honoured while its session is still active, so a

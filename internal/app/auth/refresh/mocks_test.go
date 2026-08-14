@@ -259,6 +259,15 @@ func (m *mockSessionRepository) FindActiveByID(
 	return m.FindByID(ctx, id)
 }
 
+func (m *mockSessionRepository) FindActiveByUserAndDevice(
+	ctx context.Context,
+	userID uuid.UUID,
+	deviceID string,
+) (*session.Session, error) {
+
+	return nil, errs.ErrSessionNotFound
+}
+
 func (m *mockSessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,

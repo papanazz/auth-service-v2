@@ -107,6 +107,7 @@ services:
       LOGIN_IP_WINDOW: 1m
       LOGIN_EMAIL_LIMIT: 5
       LOGIN_EMAIL_WINDOW: 15m
+      LOGIN_DEVICE_GRACE_PERIOD: 5m
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]
       interval: 5s

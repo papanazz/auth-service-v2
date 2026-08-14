@@ -151,6 +151,58 @@ func (q *Queries) GetActiveSessionByID(ctx context.Context, id uuid.UUID) (Sessi
 	return i, err
 }
 
+const getActiveSessionByUserAndDevice = `-- name: GetActiveSessionByUserAndDevice :one
+
+
+
+SELECT id, user_id, device_id, device_name, device_type, user_agent, ip_address, last_used_at, last_refreshed_at, expires_at, revoked_at, revoked_reason, created_at, updated_at
+
+FROM sessions
+
+WHERE user_id = $1
+
+AND device_id = $2
+
+AND revoked_at IS NULL
+
+LIMIT 1
+`
+
+type GetActiveSessionByUserAndDeviceParams struct {
+	UserID   uuid.UUID `json:"user_id"`
+	DeviceID string    `json:"device_id"`
+}
+
+// =====================================================
+// Find Active Session By User And Device
+// =====================================================
+//
+// Backs the partial unique index uq_sessions_active_device: a user may
+// have at most one active session per device_id. Used by login to detect
+// a device already holding an active session before creating a new one.
+// =====================================================
+func (q *Queries) GetActiveSessionByUserAndDevice(ctx context.Context, arg GetActiveSessionByUserAndDeviceParams) (Session, error) {
+	row := q.db.QueryRow(ctx, getActiveSessionByUserAndDevice, arg.UserID, arg.DeviceID)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceID,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
+		&i.LastRefreshedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokedReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 
 

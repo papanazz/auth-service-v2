@@ -48,6 +48,10 @@ func WriteError(
 		case errs.CodeTooManyRequest:
 
 			status = http.StatusTooManyRequests
+
+		case errs.CodeDeviceSessionActive:
+
+			status = http.StatusConflict
 		}
 
 		w.Header().Set(

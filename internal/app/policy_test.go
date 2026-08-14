@@ -21,6 +21,8 @@ func testConfig() *config.Config {
 	cfg.Security.RefreshToken.TTL = 720 * time.Hour
 	cfg.Security.Session.TTL = 2160 * time.Hour
 
+	cfg.Security.Login.Device.GracePeriod = 5 * time.Minute
+
 	return cfg
 }
 
@@ -103,6 +105,7 @@ func TestNewLoginSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
 		{"credential window", policy.Credential.Window, cfg.Security.Login.Email.Window},
 		{"refresh token TTL", policy.RefreshTokenTTL, cfg.Security.RefreshToken.TTL},
 		{"session TTL", policy.SessionTTL, cfg.Security.Session.TTL},
+		{"device grace period", policy.DeviceGracePeriod, cfg.Security.Login.Device.GracePeriod},
 	}
 
 	for _, tt := range tests {

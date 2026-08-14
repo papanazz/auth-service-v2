@@ -26,4 +26,6 @@ const (
 	CodeInvalidRefreshToken Code = "AUTH_INVALID_REFRESH_TOKEN"
 
 	CodeRefreshTokenReplay Code = "AUTH_REFRESH_TOKEN_REPLAY"
+
+	CodeDeviceSessionActive Code = "DEVICE_SESSION_ALREADY_ACTIVE"
 )

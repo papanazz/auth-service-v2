@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/session"
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
@@ -168,6 +169,131 @@ func TestLoginService_Handle_SessionRecordsClientContext(t *testing.T) {
 	}
 }
 
+// A device may hold at most one active session. A second login within the
+// grace period is assumed to be the same client retrying (e.g. after a
+// network timeout that lost the first response), so the stale session is
+// superseded rather than left to collide with the new one.
+func TestLoginService_Handle_SupersedesRecentSessionOnSameDevice(t *testing.T) {
+
+	h := newHarness()
+
+	account := h.activeAccount("bayu@example.com")
+
+	cmd := validCommand()
+
+	existing := h.activeSessionForDevice(
+		account.ID,
+		cmd.DeviceID,
+		time.Now().Add(-1*time.Minute),
+	)
+
+	result, err := h.service().Handle(
+		context.Background(),
+		cmd,
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.AccessToken == "" {
+		t.Error("access token is empty")
+	}
+
+	if len(h.sessions.revokedSessions) != 1 || h.sessions.revokedSessions[0] != existing.ID {
+		t.Fatalf("revoked sessions = %v, want [%v]", h.sessions.revokedSessions, existing.ID)
+	}
+
+	if h.sessions.revokedReasons[0] != session.RevokeSessionSuperseded {
+		t.Errorf("revoke reason = %v, want %v", h.sessions.revokedReasons[0], session.RevokeSessionSuperseded)
+	}
+
+	if len(h.sessions.created) != 1 {
+		t.Fatalf("created %d sessions, want 1", len(h.sessions.created))
+	}
+
+	if h.sessions.created[0].ID == existing.ID {
+		t.Error("login must mint a new session rather than reuse the superseded one")
+	}
+}
+
+// Past the grace period, an existing active session on the device is left
+// alone and the new login is rejected — silently killing a session that has
+// been active for a while looks more like a bug or an attacker than a retry.
+func TestLoginService_Handle_RejectsStaleSessionOnSameDevice(t *testing.T) {
+
+	h := newHarness()
+
+	account := h.activeAccount("bayu@example.com")
+
+	cmd := validCommand()
+
+	existing := h.activeSessionForDevice(
+		account.ID,
+		cmd.DeviceID,
+		time.Now().Add(-1*time.Hour),
+	)
+
+	result, err := h.service().Handle(
+		context.Background(),
+		cmd,
+	)
+
+	if !errors.Is(err, errs.ErrDeviceSessionActive) {
+		t.Fatalf("error = %v, want %v", err, errs.ErrDeviceSessionActive)
+	}
+
+	if result != nil {
+		t.Errorf("result = %+v, want nil on error", result)
+	}
+
+	if len(h.sessions.revokedSessions) != 0 {
+		t.Errorf("revoked sessions = %v, want none — the existing session must be left alone", h.sessions.revokedSessions)
+	}
+
+	if len(h.sessions.created) != 0 {
+		t.Errorf("created %d sessions, want 0", len(h.sessions.created))
+	}
+
+	stored := h.sessions.stored[existing.ID]
+
+	if stored.RevokedAt != nil {
+		t.Error("the stale session must not be revoked by a rejected login")
+	}
+
+	if got := h.audit.types(); len(got) != 1 || got[0] != audit.EventLoginFailed {
+		t.Errorf("audit events = %v, want a single LOGIN_FAILED", got)
+	}
+}
+
+// A different device_id for the same user must not collide — the unique
+// constraint (and this check) are scoped per device, not per user.
+func TestLoginService_Handle_DifferentDeviceIsUnaffectedByExistingSession(t *testing.T) {
+
+	h := newHarness()
+
+	account := h.activeAccount("bayu@example.com")
+
+	h.activeSessionForDevice(
+		account.ID,
+		"a-different-device",
+		time.Now(),
+	)
+
+	cmd := validCommand()
+
+	if _, err := h.service().Handle(
+		context.Background(),
+		cmd,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(h.sessions.revokedSessions) != 0 {
+		t.Errorf("revoked sessions = %v, want none", h.sessions.revokedSessions)
+	}
+}
+
 func TestLoginService_Handle_Failures(t *testing.T) {
 
 	tests := []struct {
@@ -261,6 +387,17 @@ func TestLoginService_Handle_Failures(t *testing.T) {
 			setup: func(h *harness) Command {
 				h.activeAccount("bayu@example.com")
 				h.accessTokens.err = errBackendDown
+				return validCommand()
+			},
+
+			wantErr: errBackendDown,
+		},
+		{
+			name: "propagates a device session lookup failure",
+
+			setup: func(h *harness) Command {
+				h.activeAccount("bayu@example.com")
+				h.sessions.findActiveByDeviceErr = errBackendDown
 				return validCommand()
 			},
 

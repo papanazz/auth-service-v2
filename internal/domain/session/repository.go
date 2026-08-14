@@ -30,6 +30,15 @@ type Repository interface {
 		error,
 	)
 
+	FindActiveByUserAndDevice(
+		ctx context.Context,
+		userID uuid.UUID,
+		deviceID string,
+	) (
+		*Session,
+		error,
+	)
+
 	Revoke(
 		ctx context.Context,
 		id uuid.UUID,
