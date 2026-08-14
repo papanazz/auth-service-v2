@@ -47,6 +47,8 @@ type Application struct {
 
 	DB *pgxpool.Pool
 
+	Redis *redis.Cache
+
 	RegisterService *register.RegisterService
 
 	LoginService *login.LoginService
@@ -295,6 +297,8 @@ func New(
 		Logger: log,
 
 		DB: db,
+
+		Redis: redisClient,
 
 		Metrics: appMetrics,
 

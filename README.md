@@ -19,7 +19,8 @@ Decisions / Gaps / Tested Scenarios reference, including what's
 | POST | `/v1/auth/login` | [`docs/login.md`](docs/login.md) |
 | POST | `/v1/auth/refresh` | [`docs/refresh.md`](docs/refresh.md) |
 | POST | `/v1/auth/logout` | [`docs/logout.md`](docs/logout.md) |
-| GET | `/health` | — |
+| GET | `/health` | [`docs/health.md`](docs/health.md) |
+| GET | `/ready` | [`docs/health.md`](docs/health.md) |
 | GET | `/metrics` | [`docs/metrics.md`](docs/metrics.md) |
 
 ## What's Here
@@ -54,6 +55,12 @@ Decisions / Gaps / Tested Scenarios reference, including what's
   `event.type` — all while keeping cardinality bounded and, after a bug
   caught during this build, keeping raw tokens out of the tracing
   backend entirely (see [`docs/tracing.md`](docs/tracing.md) Decisions).
+- **Liveness and readiness as two separate checks**, not one — `/health`
+  never touches Postgres or Redis (a dependency outage shouldn't trigger
+  a pointless process restart), `/ready` actually pings both and is what
+  `docker-compose.yml`'s own healthcheck targets, so a real outage shows
+  up as `unhealthy` in `docker compose ps` instead of being invisible
+  (see [`docs/health.md`](docs/health.md)).
 
 ## Architecture
 

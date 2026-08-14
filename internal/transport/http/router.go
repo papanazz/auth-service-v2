@@ -34,11 +34,21 @@ func NewRouter(
 		promhttp.Handler(),
 	)
 
-	healthHandler := health.NewHandler()
+	healthHandler :=
+		health.NewHandler(
+			application.Logger,
+			application.DB,
+			application.Redis,
+		)
 
 	r.Get(
 		"/health",
 		healthHandler.Health,
+	)
+
+	r.Get(
+		"/ready",
+		healthHandler.Ready,
 	)
 
 	userHandler := handler.NewUserHandler(application.Logger, application.RegisterService)

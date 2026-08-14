@@ -115,7 +115,12 @@ services:
       RESEND_VERIFICATION_IP_WINDOW: 10m
       IDEMPOTENCY_KEY_TTL: 10m
     healthcheck:
-      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]
+      # /ready, not /health: Compose has one healthcheck per container,
+      # no separate liveness/readiness concept like Kubernetes, so it
+      # needs to point at the stricter check — one that actually reaches
+      # Postgres and Redis — or a dependency outage would never be
+      # reflected in `docker compose ps` at all. See docs/health.md.
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/ready" ]
       interval: 5s
       timeout: 3s
       retries: 5
