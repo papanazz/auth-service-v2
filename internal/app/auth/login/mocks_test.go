@@ -158,6 +158,7 @@ func (m *mockSessionRepository) FindActiveByID(
 func (m *mockSessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,
+	reason session.RevokeReason,
 ) error {
 
 	return nil

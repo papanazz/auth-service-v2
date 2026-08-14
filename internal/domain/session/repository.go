@@ -33,6 +33,7 @@ type Repository interface {
 	Revoke(
 		ctx context.Context,
 		id uuid.UUID,
+		reason RevokeReason,
 	) error
 
 	UpdateLastUsedAt(

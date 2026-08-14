@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/logout"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/refresh"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 
@@ -44,6 +45,8 @@ type Application struct {
 	LoginService *login.LoginService
 
 	RefreshService *refresh.Service
+
+	LogoutService *logout.Service
 }
 
 func New(
@@ -186,6 +189,20 @@ func New(
 			cfg.Security.RefreshToken.TTL,
 		)
 
+	logoutService :=
+		logout.NewService(
+
+			transactionManager,
+
+			refreshTokenRepository,
+
+			sessionRepository,
+
+			refreshHasher,
+
+			auditPublisher,
+		)
+
 	return &Application{
 
 		Config: cfg,
@@ -201,6 +218,8 @@ func New(
 		LoginService: loginService,
 
 		RefreshService: refreshService,
+
+		LogoutService: logoutService,
 	}, nil
 
 }

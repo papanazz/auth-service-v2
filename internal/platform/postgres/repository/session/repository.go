@@ -108,11 +108,19 @@ func (r *SessionRepository) FindActiveByID(
 func (r *SessionRepository) Revoke(
 	ctx context.Context,
 	id uuid.UUID,
+	reason domain.RevokeReason,
 ) error {
+
+	reasonValue := string(reason)
 
 	return r.query.RevokeSession(
 		ctx,
-		id,
+		sqlc.RevokeSessionParams{
+
+			ID: id,
+
+			RevokedReason: &reasonValue,
+		},
 	)
 }
 

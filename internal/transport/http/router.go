@@ -62,5 +62,12 @@ func NewRouter(
 		refreshHandler.Handle,
 	)
 
+	logoutHandler := handler.NewLogoutHandler(application.Logger, application.LogoutService)
+
+	r.Post(
+		"/v1/auth/logout",
+		logoutHandler.Handle,
+	)
+
 	return r
 }

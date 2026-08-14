@@ -199,16 +199,25 @@ SET
 
     revoked_at = NOW(),
 
+    revoked_reason = $2,
+
     updated_at = NOW()
 
 WHERE id = $1
+
+AND revoked_at IS NULL
 `
+
+type RevokeSessionParams struct {
+	ID            uuid.UUID `json:"id"`
+	RevokedReason *string   `json:"revoked_reason"`
+}
 
 // =====================================================
 // Revoke Session
 // =====================================================
-func (q *Queries) RevokeSession(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, revokeSession, id)
+func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
+	_, err := q.db.Exec(ctx, revokeSession, arg.ID, arg.RevokedReason)
 	return err
 }
 

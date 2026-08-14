@@ -102,9 +102,13 @@ SET
 
     revoked_at = NOW(),
 
+    revoked_reason = $2,
+
     updated_at = NOW()
 
-WHERE id = $1;
+WHERE id = $1
+
+AND revoked_at IS NULL;
 
 
 
