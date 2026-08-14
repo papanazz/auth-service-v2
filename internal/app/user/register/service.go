@@ -5,10 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/google/uuid"
-
+	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
-
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -18,6 +16,10 @@ type Command struct {
 	Email string
 
 	Password string
+
+	IPAddress string
+
+	UserAgent string
 }
 
 type Result struct {
@@ -32,6 +34,8 @@ type RegisterService struct {
 	passwordHasher password.Hasher
 
 	passwordPolicy password.Policy
+
+	audit audit.Publisher
 }
 
 func NewService(
@@ -42,6 +46,8 @@ func NewService(
 
 	passwordPolicy password.Policy,
 
+	audit audit.Publisher,
+
 ) *RegisterService {
 
 	return &RegisterService{
@@ -51,6 +57,8 @@ func NewService(
 		passwordHasher: passwordHasher,
 
 		passwordPolicy: passwordPolicy,
+
+		audit: audit,
 	}
 
 }
@@ -66,6 +74,10 @@ func (s *RegisterService) Handle(
 	error,
 ) {
 
+	//
+	// 1. Normalize and validate input
+	//
+
 	email :=
 		strings.ToLower(
 			strings.TrimSpace(
@@ -79,6 +91,10 @@ func (s *RegisterService) Handle(
 
 	}
 
+	//
+	// 2. Enforce password policy
+	//
+
 	if err :=
 		s.passwordPolicy.Validate(
 			cmd.Password,
@@ -87,6 +103,15 @@ func (s *RegisterService) Handle(
 		return nil, err
 
 	}
+
+	//
+	// 3. Reject a duplicate account
+	//
+	// Racy against a concurrent registration for the same email — the
+	// database's unique constraint is the real guarantee. This check exists
+	// to give the common case a clean ErrUserAlreadyExists instead of a
+	// raw constraint-violation error.
+	//
 
 	_, err :=
 		s.userRepository.FindByEmail(
@@ -114,6 +139,10 @@ func (s *RegisterService) Handle(
 
 	}
 
+	//
+	// 4. Hash the password and persist the account
+	//
+
 	hash, err :=
 		s.passwordHasher.Hash(
 			cmd.Password,
@@ -126,18 +155,18 @@ func (s *RegisterService) Handle(
 	}
 
 	account :=
-		user.User{
+		user.New(
+			email,
+			hash,
+		)
 
-			ID: uuid.New(),
-
-			Email: email,
-
-			PasswordHash: hash,
-
-			Status: user.StatusActive,
-
-			EmailVerifiedAt: nil,
-		}
+	// user.New defaults to StatusPending, which is meant to gate login
+	// behind email verification. That flow doesn't exist yet — there is no
+	// verification token, no delivery mechanism, and no endpoint to
+	// complete it — so activate the account immediately rather than
+	// stranding every new user in a state nothing can ever clear. See
+	// docs/register.txt.
+	account.Status = user.StatusActive
 
 	err =
 		s.userRepository.Create(
@@ -150,6 +179,21 @@ func (s *RegisterService) Handle(
 		return nil, err
 
 	}
+
+	//
+	// 5. Publish audit event
+	//
+
+	_ =
+		s.audit.Publish(
+			ctx,
+			registeredEvent(
+				account.ID,
+				account.Email,
+				cmd.IPAddress,
+				cmd.UserAgent,
+			),
+		)
 
 	return &Result{
 

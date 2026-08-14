@@ -44,8 +44,10 @@ func (h *UserHandler) Register(
 	res, err := h.register.Handle(
 		ctx,
 		register.Command{
-			Email:    req.Email,
-			Password: req.Password,
+			Email:     req.Email,
+			Password:  req.Password,
+			IPAddress: r.RemoteAddr,
+			UserAgent: r.UserAgent(),
 		},
 	)
 

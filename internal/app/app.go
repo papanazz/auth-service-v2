@@ -160,6 +160,7 @@ func New(
 			userRepository,
 			passwordHasher,
 			password.NewPolicy(),
+			auditPublisher,
 		)
 
 	loginService :=

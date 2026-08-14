@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
@@ -76,6 +77,15 @@ type mockPolicy struct {
 
 func (m mockPolicy) Validate(password string) error {
 	return m.err
+}
+
+type mockAuditPublisher struct {
+	events []audit.Event
+}
+
+func (m *mockAuditPublisher) Publish(ctx context.Context, event audit.Event) error {
+	m.events = append(m.events, event)
+	return nil
 }
 
 //
@@ -233,6 +243,7 @@ func TestRegisterService_Handle(t *testing.T) {
 				tt.repository,
 				tt.hasher,
 				tt.policy,
+				&mockAuditPublisher{},
 			)
 
 			result, err := service.Handle(
@@ -278,6 +289,7 @@ func TestRegisterService_PersistsNormalizedAccount(t *testing.T) {
 		repository,
 		mockHasher{},
 		mockPolicy{},
+		&mockAuditPublisher{},
 	)
 
 	const plaintext = "Str0ng!Passphrase"
@@ -322,5 +334,97 @@ func TestRegisterService_PersistsNormalizedAccount(t *testing.T) {
 
 	if stored.ID.String() != result.ID {
 		t.Errorf("returned ID %q does not match stored ID %q", result.ID, stored.ID)
+	}
+}
+
+func TestRegisterService_Handle_RecordsAuditTrail(t *testing.T) {
+
+	repository := &mockUserRepository{}
+
+	auditPublisher := &mockAuditPublisher{}
+
+	service := NewService(
+		repository,
+		mockHasher{},
+		mockPolicy{},
+		auditPublisher,
+	)
+
+	result, err := service.Handle(
+		context.Background(),
+		Command{
+			Email:     "bayu@example.com",
+			Password:  "Str0ng!Passphrase",
+			IPAddress: "203.0.113.10",
+			UserAgent: "Mozilla/5.0",
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(auditPublisher.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(auditPublisher.events))
+	}
+
+	event := auditPublisher.events[0]
+
+	if event.Type != audit.EventUserRegistered {
+		t.Errorf("event type = %q, want %q", event.Type, audit.EventUserRegistered)
+	}
+
+	if !event.Success {
+		t.Error("a successful registration must be audited as a success")
+	}
+
+	if event.UserID == nil || event.UserID.String() != result.ID {
+		t.Errorf("event user ID = %v, want %q", event.UserID, result.ID)
+	}
+
+	if event.Email != "bayu@example.com" {
+		t.Errorf("event email = %q, want the normalized address", event.Email)
+	}
+
+	if event.IPAddress != "203.0.113.10" {
+		t.Errorf("event IP = %q, want %q", event.IPAddress, "203.0.113.10")
+	}
+
+	if event.UserAgent != "Mozilla/5.0" {
+		t.Errorf("event user agent = %q, want %q", event.UserAgent, "Mozilla/5.0")
+	}
+}
+
+// A rejected registration (duplicate email, weak password, ...) must not be
+// audited as a USER_REGISTERED success — nothing was actually created.
+func TestRegisterService_Handle_DoesNotAuditAFailedRegistration(t *testing.T) {
+
+	auditPublisher := &mockAuditPublisher{}
+
+	service := NewService(
+		&mockUserRepository{
+			findByEmail: func(ctx context.Context, email string) (*user.User, error) {
+				return &user.User{ID: uuid.New(), Email: email}, nil
+			},
+		},
+		mockHasher{},
+		mockPolicy{},
+		auditPublisher,
+	)
+
+	_, err := service.Handle(
+		context.Background(),
+		Command{
+			Email:    "taken@example.com",
+			Password: "Str0ng!Passphrase",
+		},
+	)
+
+	if !errors.Is(err, errs.ErrUserAlreadyExists) {
+		t.Fatalf("error = %v, want %v", err, errs.ErrUserAlreadyExists)
+	}
+
+	if len(auditPublisher.events) != 0 {
+		t.Errorf("audit events = %d, want 0 on a failed registration", len(auditPublisher.events))
 	}
 }

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"net"
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -46,6 +47,20 @@ func mapCreateParams(
 	}
 }
 
+// parseIP converts the client address into the INET value the column
+// expects.
+//
+// The transport layer supplies http.Request.RemoteAddr, which carries a
+// port ("203.0.113.10:54321", or "[2001:db8::1]:54321" for IPv6).
+// netip.ParseAddr rejects that form, so the port is stripped first. Mirrors
+// the identical fix in the session repository's mapper — see its
+// TestParseIP for the regression this guards against: every event was
+// silently stored with a NULL ip_address despite the value being collected
+// correctly.
+//
+// An unparseable address is stored as NULL rather than failing the
+// request: the address is diagnostic metadata, not an authentication
+// input.
 func parseIP(
 	value string,
 ) *netip.Addr {
@@ -54,16 +69,22 @@ func parseIP(
 		return nil
 	}
 
-	ip, err :=
+	candidate := value
+
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		candidate = host
+	}
+
+	addr, err :=
 		netip.ParseAddr(
-			value,
+			candidate,
 		)
 
 	if err != nil {
 		return nil
 	}
 
-	return &ip
+	return &addr
 }
 
 func text(
