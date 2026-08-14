@@ -34,4 +34,6 @@ const (
 	CodeIdempotencyKeyConflict Code = "IDEMPOTENCY_KEY_CONFLICT"
 
 	CodeIdempotencyKeyRequired Code = "IDEMPOTENCY_KEY_REQUIRED"
+
+	CodeInvalidVerificationToken Code = "INVALID_VERIFICATION_TOKEN"
 )

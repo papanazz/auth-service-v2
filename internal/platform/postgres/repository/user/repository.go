@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -118,6 +120,37 @@ func (r *UserRepository) FindByEmail(
 
 	return mapUser(row), nil
 
+}
+
+func (r *UserRepository) MarkEmailVerified(
+	ctx context.Context,
+	userID uuid.UUID,
+	verifiedAt time.Time,
+	status user.Status,
+) error {
+
+	return r.query.MarkEmailVerified(
+		ctx,
+		sqlc.MarkEmailVerifiedParams{
+
+			ID: userID,
+
+			EmailVerifiedAt: &verifiedAt,
+
+			Status: sqlc.UserStatus(
+				status,
+			),
+		},
+	)
+}
+
+func (r *UserRepository) WithTx(
+	tx pgx.Tx,
+) user.Repository {
+
+	return &UserRepository{
+		query: sqlc.New(tx),
+	}
 }
 
 func mapUser(

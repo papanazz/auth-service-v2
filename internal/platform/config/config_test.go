@@ -22,6 +22,8 @@ func validConfig() *Config {
 
 	cfg.Idempotency.TTL = 10 * time.Minute
 
+	cfg.EmailVerification.TokenTTL = 24 * time.Hour
+
 	return cfg
 }
 
@@ -136,6 +138,15 @@ func TestConfig_Validate(t *testing.T) {
 			},
 
 			wantErr: "IDEMPOTENCY_KEY_TTL must be positive",
+		},
+		{
+			name: "rejects a non-positive email verification token TTL",
+
+			mutate: func(c *Config) {
+				c.EmailVerification.TokenTTL = 0
+			},
+
+			wantErr: "EMAIL_VERIFICATION_TOKEN_TTL must be positive",
 		},
 	}
 

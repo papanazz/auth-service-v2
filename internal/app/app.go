@@ -10,9 +10,12 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/logout"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/refresh"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
+	"github.com/papanazz/auth-service-v2/internal/app/user/resendverification"
+	"github.com/papanazz/auth-service-v2/internal/app/user/verifyemail"
 
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
+	"github.com/papanazz/auth-service-v2/internal/platform/email"
 	"github.com/papanazz/auth-service-v2/internal/platform/idempotency"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/platform/metrics"
@@ -21,6 +24,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/password"
 	"github.com/papanazz/auth-service-v2/internal/platform/postgres/sqlc"
 	"github.com/papanazz/auth-service-v2/internal/platform/refresh_token"
+	verificationPlatform "github.com/papanazz/auth-service-v2/internal/platform/verification"
 
 	"github.com/papanazz/auth-service-v2/internal/platform/redis"
 
@@ -30,6 +34,7 @@ import (
 	refreshRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/refresh_token"
 	sessionRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/session"
 	userRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/user"
+	verificationRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/verification"
 )
 
 type Application struct {
@@ -48,6 +53,10 @@ type Application struct {
 	RefreshService *refresh.Service
 
 	LogoutService *logout.Service
+
+	VerifyEmailService *verifyemail.Service
+
+	ResendVerificationService *resendverification.Service
 
 	IdempotencyStore *idempotency.Store
 }
@@ -110,6 +119,22 @@ func New(
 	refreshHasher :=
 		refresh_token.NewSHA256Hasher()
 
+	verificationGenerator :=
+		verificationPlatform.NewRandomGenerator()
+
+	verificationHasher :=
+		verificationPlatform.NewSHA256Hasher()
+
+	verificationCache :=
+		verificationPlatform.NewRedisCache(
+			redisClient.Client,
+		)
+
+	emailPublisher :=
+		email.NewLogPublisher(
+			log,
+		)
+
 		// =========================
 		// Repositories
 		// =========================
@@ -129,6 +154,11 @@ func New(
 			queries,
 		)
 
+	verificationTokenRepository :=
+		verificationRepo.NewVerificationRepository(
+			queries,
+		)
+
 	auditPublisher :=
 		auditRepo.NewAuditPublisher(
 			queries,
@@ -143,6 +173,9 @@ func New(
 
 	registerPolicy :=
 		newRegisterSecurityPolicy(cfg)
+
+	resendVerificationPolicy :=
+		newResendVerificationSecurityPolicy(cfg)
 
 	attemptTracker :=
 		authattempt.NewRedisTracker(
@@ -160,7 +193,13 @@ func New(
 
 	registerService :=
 		register.NewService(
+			transactionManager,
 			userRepository,
+			verificationTokenRepository,
+			verificationCache,
+			verificationGenerator,
+			verificationHasher,
+			emailPublisher,
 			passwordHasher,
 			password.NewPolicy(),
 			auditPublisher,
@@ -217,6 +256,28 @@ func New(
 			auditPublisher,
 		)
 
+	verifyEmailService :=
+		verifyemail.NewService(
+			transactionManager,
+			verificationTokenRepository,
+			userRepository,
+			verificationHasher,
+			auditPublisher,
+		)
+
+	resendVerificationService :=
+		resendverification.NewService(
+			userRepository,
+			verificationTokenRepository,
+			verificationCache,
+			verificationGenerator,
+			verificationHasher,
+			emailPublisher,
+			auditPublisher,
+			attemptTracker,
+			resendVerificationPolicy,
+		)
+
 	return &Application{
 
 		Config: cfg,
@@ -234,6 +295,10 @@ func New(
 		RefreshService: refreshService,
 
 		LogoutService: logoutService,
+
+		VerifyEmailService: verifyEmailService,
+
+		ResendVerificationService: resendVerificationService,
 
 		IdempotencyStore: idempotencyStore,
 	}, nil

@@ -62,6 +62,11 @@ kill.
 
 ## Decisions
 
+- **Logout does not gate on `EmailVerifiedAt`.** An unverified account
+  can log out exactly like a verified one — deliberate, same reasoning
+  as login and refresh; see `docs/email-verification.md` Decisions.
+  Verified live: an unverified account logged out successfully.
+
 - **No Idempotency-Key requirement, unlike login.** Login needs one
   because a retried login mints an entirely new session — without
   idempotency, two retries collide into two sessions fighting over one

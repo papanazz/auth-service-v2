@@ -28,6 +28,10 @@ const (
 	EventPasswordChanged EventType = "PASSWORD_CHANGED"
 
 	EventAccountLocked EventType = "ACCOUNT_LOCKED"
+
+	EventEmailVerified EventType = "EMAIL_VERIFIED"
+
+	EventVerificationEmailSent EventType = "VERIFICATION_EMAIL_SENT"
 )
 
 type Event struct {

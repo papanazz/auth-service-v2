@@ -12,6 +12,8 @@ const (
 	PolicyAPIRateLimit PolicyType = "API_RATE_LIMIT"
 
 	PolicyRegisterAttempt PolicyType = "REGISTER_ATTEMPT"
+
+	PolicyResendVerification PolicyType = "RESEND_VERIFICATION"
 )
 
 type LimitPolicy struct {

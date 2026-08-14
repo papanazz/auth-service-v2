@@ -34,16 +34,31 @@ login are separate steps; this endpoint returns no tokens.
    clean `USER_ALREADY_EXISTS` instead of a raw constraint-violation
    error reaching the client.
 
-5. **Hash the password and persist the account.** Argon2id
+5. **Hash the password and build the account.** Argon2id
    (`platform/password/argon2id.go`): 64 MiB memory, 3 iterations, 2
    threads, 16-byte salt, 32-byte key. The account is built via
    `user.New()`, then `Status` is immediately forced to `ACTIVE` — see
    Decisions.
 
-6. **Publish audit event.** `USER_REGISTERED`, `success=true`, with the
-   account's email/IP/user agent. Best-effort (errors are swallowed) —
-   an audit outage must not fail a registration that already succeeded.
-   Only the success path is audited; see Gaps.
+6. **Persist the account and its verification token atomically.**
+   Generates a raw token + TTL-bound expiry
+   (`EMAIL_VERIFICATION_TOKEN_TTL`, default 24h) and hashes it, then
+   creates both the account row and the token row inside one
+   `transaction.Manager.WithinTransaction` call — the first transactional
+   wiring register has had. Both or neither: a token that failed to
+   persist would leave a real account with no way to receive one until a
+   resend — recoverable, but not worth accepting when both writes fit in
+   one transaction.
+
+7. **Publish the audit event, cache the raw token, and send the
+   verification email.** All three after commit, all best-effort — an
+   outage in any of them must not fail a registration that already
+   succeeded, and none should run against a transaction that might still
+   roll back. `USER_REGISTERED` is audited with `success=true` and the
+   account's email/IP/user agent; only the success path is audited, see
+   Gaps. The raw token is cached (`verification.Cache`) and handed to
+   `domain/email.Publisher` — see `docs/email-verification.md` for the
+   full verify/resend flow this feeds.
 
 ## Decisions
 
@@ -62,14 +77,18 @@ login are separate steps; this endpoint returns no tokens.
   only gets an entry once its own documentation confirms the
   equivalence, not by assuming it matches Gmail's behavior.
 
-- **Accounts are created `ACTIVE`, not `PENDING`.** `user.New()` defaults
-  to `PENDING`, and the domain model is clearly shaped for an email
-  verification flow (`EmailVerifiedAt`, `VerifyEmail()`, the `PENDING`
-  status itself). There is no verification token, no delivery mechanism,
-  and no endpoint to complete verification — shipping `PENDING` today
-  would permanently strand every new account with no way to ever reach
-  `ACTIVE`. `service.go` overrides the status explicitly, with a comment
-  pointing here. See Gaps.
+- **Accounts are created `ACTIVE`, not `PENDING`,** even though a real
+  verification flow now exists (`docs/email-verification.md`).
+  `user.New()` defaults to `PENDING`; `service.go` overrides it
+  explicitly. This is not a leftover from before verification was
+  built — it's the same deliberate choice as login/refresh/logout not
+  gating on `EmailVerifiedAt` (see `docs/email-verification.md`
+  Decisions): verification is collected as a trust signal, not enforced
+  as a precondition for using the account, so there is no reason for a
+  brand-new account to sit in a non-functional state waiting on an email
+  the user might never see. `PENDING` remains reachable only via direct
+  domain use (`user.New()` without the override), not through this
+  endpoint.
 
 - **Rate limiting counts every attempt, not just failures**, unlike
   login's credential-based limiter (which only counts wrong-password
@@ -101,6 +120,9 @@ login are separate steps; this endpoint returns no tokens.
 - Argon2id password hashing — the raw password never reaches the
   repository or the database.
 - Audit trail entry (`USER_REGISTERED`) with email, IP, and user agent.
+- Issues a hashed, TTL-bound email verification token in the same
+  transaction as account creation, caches its raw value, and publishes
+  it via `domain/email.Publisher` — see `docs/email-verification.md`.
 - User enumeration is not specifically defended here the way login
   defends it (dummy-hash verification on unknown accounts): a duplicate
   email returns `USER_ALREADY_EXISTS`. This is an intentional
@@ -109,14 +131,6 @@ login are separate steps; this endpoint returns no tokens.
   above rather than by hiding the signal itself.
 
 ## Gaps
-
-- **Email verification is unbuilt.** `user.New()` / `VerifyEmail()` /
-  `EmailVerifiedAt` exist in the domain model; nothing in this service
-  uses them beyond the status override. Building this out requires: a
-  verification token + TTL, an email delivery mechanism (none exists in
-  this repo), a verify endpoint, and login gating on `EmailVerifiedAt`.
-  The natural next capability if this project needs to look more
-  production-shaped.
 
 - **Failure-path auditing is incomplete.** Only a successful registration
   is published. A duplicate-email attempt is a real security signal
@@ -184,6 +198,14 @@ Unit — `internal/app/user/register/service_test.go`
 - rejects a request over the IP limit; propagates a rate-limiter failure
 - counts an attempt toward the limit even when it goes on to fail
   validation (e.g. duplicate email)
+- issues a verification token: created in the same transaction as the
+  account, cached with the correct raw value, and published with the
+  correct recipient/token/expiry (`TestRegisterService_Handle_IssuesVerificationToken`)
+- registration still succeeds even when the token cache or email publish
+  step fails — both are best-effort
+  (`TestRegisterService_Handle_ToleratesCacheAndEmailFailures`)
+- propagates a verification token generation failure, a verification
+  token create failure, or a transaction failure
 
 Unit — `internal/platform/authattempt/key_test.go`: two connections from
 the same client on different ephemeral ports produce the same rate-limit
@@ -226,6 +248,10 @@ e2e — against the real docker-compose stack:
   once the window expires
 - full lifecycle sanity: register → login → refresh → logout all succeed
   end-to-end
+- register issues a verification token with the correct 24h expiry
+  (confirmed via the `LogPublisher` log line and direct DB inspection);
+  see `docs/email-verification.md` Tested Scenarios for the full
+  verify/resend e2e coverage this feeds into
 
 ## Related Files
 
@@ -238,6 +264,9 @@ internal/app/policy.go                               config -> SecurityPolicy
 internal/domain/user/user.go                         User entity, status lifecycle
 internal/domain/user/email.go                        NormalizeEmail, canonicalization rules
 internal/domain/user/repository.go                   Repository interface
+internal/domain/verification/                        Token/Repository/Cache/Generator/Hasher
+internal/domain/email/publisher.go                    Publisher interface
+                                                        (see docs/email-verification.md)
 internal/domain/password/                            Hasher / Policy interfaces
 internal/platform/password/                          Argon2id, Policy implementations
 internal/platform/authattempt/                        Redis-backed rate limiting

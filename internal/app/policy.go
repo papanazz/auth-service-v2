@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
+	"github.com/papanazz/auth-service-v2/internal/app/user/resendverification"
 	"github.com/papanazz/auth-service-v2/internal/domain/security"
 	"github.com/papanazz/auth-service-v2/internal/platform/config"
 )
@@ -64,5 +65,29 @@ func newRegisterSecurityPolicy(
 
 			Window: cfg.Security.Register.IP.Window,
 		},
+
+		EmailVerificationTokenTTL: cfg.EmailVerification.TokenTTL,
+	}
+}
+
+// newResendVerificationSecurityPolicy translates configuration into the
+// resend-verification use case's security policy. Kept apart from New
+// for the same reason newLoginSecurityPolicy is — see its comment.
+func newResendVerificationSecurityPolicy(
+	cfg *config.Config,
+) resendverification.SecurityPolicy {
+
+	return resendverification.SecurityPolicy{
+
+		IP: security.LimitPolicy{
+
+			Type: security.PolicyResendVerification,
+
+			Limit: cfg.EmailVerification.Resend.Limit,
+
+			Window: cfg.EmailVerification.Resend.Window,
+		},
+
+		TokenTTL: cfg.EmailVerification.TokenTTL,
 	}
 }

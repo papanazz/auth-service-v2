@@ -171,6 +171,41 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const markEmailVerified = `-- name: MarkEmailVerified :exec
+
+
+
+UPDATE users
+
+SET
+
+    email_verified_at = $2,
+
+    status = $3,
+
+    updated_at = NOW()
+
+WHERE id = $1
+`
+
+type MarkEmailVerifiedParams struct {
+	ID              uuid.UUID  `json:"id"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at"`
+	Status          UserStatus `json:"status"`
+}
+
+// =====================================================
+// Mark Email Verified
+//
+// Status is passed in rather than computed here (e.g. PENDING ->
+// ACTIVE): that transition is a domain rule (user.VerifyEmail), and
+// this query just persists whatever the caller decided.
+// =====================================================
+func (q *Queries) MarkEmailVerified(ctx context.Context, arg MarkEmailVerifiedParams) error {
+	_, err := q.db.Exec(ctx, markEmailVerified, arg.ID, arg.EmailVerifiedAt, arg.Status)
+	return err
+}
+
 const updateLastLoginAt = `-- name: UpdateLastLoginAt :exec
 
 

@@ -103,6 +103,23 @@ func (m *mockUserRepository) Create(
 	return nil
 }
 
+func (m *mockUserRepository) MarkEmailVerified(
+	ctx context.Context,
+	userID uuid.UUID,
+	verifiedAt time.Time,
+	status user.Status,
+) error {
+
+	return nil
+}
+
+func (m *mockUserRepository) WithTx(
+	tx pgx.Tx,
+) user.Repository {
+
+	return m
+}
+
 //
 // Session repository
 //

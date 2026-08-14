@@ -20,7 +20,8 @@ func WriteError(
 		case errs.CodeInvalidRequest,
 			errs.CodeInvalidEmail,
 			errs.CodeWeakPassword,
-			errs.CodeIdempotencyKeyRequired:
+			errs.CodeIdempotencyKeyRequired,
+			errs.CodeInvalidVerificationToken:
 
 			status = http.StatusBadRequest
 

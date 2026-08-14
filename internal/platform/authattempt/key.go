@@ -27,6 +27,16 @@ func RegisterIP(
 	)
 }
 
+func ResendVerificationIP(
+	ip string,
+) string {
+
+	return fmt.Sprintf(
+		"auth:resend-verification:ip:%s",
+		normalizeIP(ip),
+	)
+}
+
 func LoginCredential(
 	email string,
 	ip string,

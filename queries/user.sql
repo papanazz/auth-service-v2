@@ -122,3 +122,28 @@ SET
     updated_at = NOW()
 
 WHERE id = $1;
+
+
+
+-- =====================================================
+-- Mark Email Verified
+--
+-- Status is passed in rather than computed here (e.g. PENDING ->
+-- ACTIVE): that transition is a domain rule (user.VerifyEmail), and
+-- this query just persists whatever the caller decided.
+-- =====================================================
+
+
+-- name: MarkEmailVerified :exec
+
+UPDATE users
+
+SET
+
+    email_verified_at = $2,
+
+    status = $3,
+
+    updated_at = NOW()
+
+WHERE id = $1;

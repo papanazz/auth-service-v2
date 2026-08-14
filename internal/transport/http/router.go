@@ -48,6 +48,20 @@ func NewRouter(
 		userHandler.Register,
 	)
 
+	verifyEmailHandler := handler.NewVerifyEmailHandler(application.Logger, application.VerifyEmailService)
+
+	r.Post(
+		"/v1/user/verify-email",
+		verifyEmailHandler.Handle,
+	)
+
+	resendVerificationHandler := handler.NewResendVerificationHandler(application.Logger, application.ResendVerificationService)
+
+	r.Post(
+		"/v1/user/verify-email/resend",
+		resendVerificationHandler.Handle,
+	)
+
 	authHandler := handler.NewAuthHandler(application.Logger, application.LoginService)
 
 	r.With(

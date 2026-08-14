@@ -162,6 +162,15 @@ type AuthenticationEvent struct {
 	SessionID *uuid.UUID         `json:"session_id"`
 }
 
+type EmailVerificationToken struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type RefreshToken struct {
 	ID            uuid.UUID                    `json:"id"`
 	SessionID     uuid.UUID                    `json:"session_id"`

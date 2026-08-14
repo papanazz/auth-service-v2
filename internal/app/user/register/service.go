@@ -3,11 +3,18 @@ package register
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/papanazz/auth-service-v2/internal/app/transaction"
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
+	domainEmail "github.com/papanazz/auth-service-v2/internal/domain/email"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
+	"github.com/papanazz/auth-service-v2/internal/domain/verification"
 
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -30,7 +37,19 @@ type Result struct {
 }
 
 type RegisterService struct {
+	transaction transaction.Manager
+
 	userRepository user.Repository
+
+	verificationTokens verification.Repository
+
+	verificationCache verification.Cache
+
+	verificationGenerator verification.Generator
+
+	verificationHasher verification.Hasher
+
+	emailPublisher domainEmail.Publisher
 
 	passwordHasher password.Hasher
 
@@ -45,7 +64,19 @@ type RegisterService struct {
 
 func NewService(
 
+	transaction transaction.Manager,
+
 	userRepository user.Repository,
+
+	verificationTokens verification.Repository,
+
+	verificationCache verification.Cache,
+
+	verificationGenerator verification.Generator,
+
+	verificationHasher verification.Hasher,
+
+	emailPublisher domainEmail.Publisher,
 
 	passwordHasher password.Hasher,
 
@@ -61,7 +92,19 @@ func NewService(
 
 	return &RegisterService{
 
+		transaction: transaction,
+
 		userRepository: userRepository,
+
+		verificationTokens: verificationTokens,
+
+		verificationCache: verificationCache,
+
+		verificationGenerator: verificationGenerator,
+
+		verificationHasher: verificationHasher,
+
+		emailPublisher: emailPublisher,
 
 		passwordHasher: passwordHasher,
 
@@ -196,7 +239,7 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 5. Hash the password and persist the account
+	// 5. Hash the password
 	//
 
 	hash, err :=
@@ -217,17 +260,65 @@ func (s *RegisterService) Handle(
 		)
 
 	// user.New defaults to StatusPending, which is meant to gate login
-	// behind email verification. That flow doesn't exist yet — there is no
-	// verification token, no delivery mechanism, and no endpoint to
-	// complete it — so activate the account immediately rather than
-	// stranding every new user in a state nothing can ever clear. See
-	// docs/register.md.
+	// behind email verification. Login/refresh/logout deliberately do not
+	// gate on EmailVerifiedAt (see docs/login.md) — verification below is
+	// informational, not an access control — so activate the account
+	// immediately rather than stranding every new user in a state only
+	// verify-email can clear. See docs/register.md.
 	account.Status = user.StatusActive
 
+	//
+	// 6. Persist the account and its verification token atomically
+	//
+	// Both or neither: a token that failed to persist would leave a real
+	// account with no way to receive one until a resend, which is
+	// recoverable, but there is no reason to accept that inconsistency
+	// when both writes fit in one transaction.
+	//
+
+	rawToken, err :=
+		s.verificationGenerator.Generate()
+
+	if err != nil {
+
+		return nil, err
+	}
+
+	verificationTokenExpiresAt :=
+		time.Now().
+			Add(s.policy.EmailVerificationTokenTTL).
+			UTC()
+
+	verificationToken :=
+		verification.Token{
+
+			ID: uuid.New(),
+
+			UserID: account.ID,
+
+			Hash: s.verificationHasher.Hash(rawToken),
+
+			ExpiresAt: verificationTokenExpiresAt,
+		}
+
 	err =
-		s.userRepository.Create(
+		s.transaction.WithinTransaction(
 			ctx,
-			account,
+			func(tx pgx.Tx) error {
+
+				if err := s.userRepository.WithTx(tx).Create(
+					ctx,
+					account,
+				); err != nil {
+
+					return err
+				}
+
+				return s.verificationTokens.WithTx(tx).Create(
+					ctx,
+					verificationToken,
+				)
+			},
 		)
 
 	if err != nil {
@@ -237,7 +328,11 @@ func (s *RegisterService) Handle(
 	}
 
 	//
-	// 6. Publish audit event
+	// 7. Publish audit event and the verification email
+	//
+	// Both best-effort and both after commit: an outage in either must
+	// not fail a registration that already succeeded, and neither should
+	// run against a transaction that might still roll back.
 	//
 
 	_ =
@@ -249,6 +344,27 @@ func (s *RegisterService) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
+		)
+
+	_ =
+		s.verificationCache.StoreRawToken(
+			ctx,
+			verificationToken.ID,
+			rawToken,
+			s.policy.EmailVerificationTokenTTL,
+		)
+
+	_ =
+		s.emailPublisher.PublishVerificationEmail(
+			ctx,
+			domainEmail.VerificationEmail{
+
+				To: account.Email,
+
+				Token: rawToken,
+
+				ExpiresAt: verificationTokenExpiresAt,
+			},
 		)
 
 	return &Result{

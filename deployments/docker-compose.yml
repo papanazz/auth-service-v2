@@ -110,6 +110,9 @@ services:
       LOGIN_DEVICE_GRACE_PERIOD: 5m
       REGISTER_IP_LIMIT: 5
       REGISTER_IP_WINDOW: 10m
+      EMAIL_VERIFICATION_TOKEN_TTL: 24h
+      RESEND_VERIFICATION_IP_LIMIT: 3
+      RESEND_VERIFICATION_IP_WINDOW: 10m
       IDEMPOTENCY_KEY_TTL: 10m
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:9000/health" ]

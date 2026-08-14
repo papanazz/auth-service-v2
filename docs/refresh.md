@@ -72,6 +72,12 @@ CAS-guarded resource to fall back on).
 
 ## Decisions
 
+- **Refresh does not gate on `EmailVerifiedAt`.** An unverified
+  account's refresh token rotates exactly like a verified one's —
+  deliberate, same reasoning as login and logout; see
+  `docs/email-verification.md` Decisions. Verified live: an unverified
+  account's refresh token was exchanged successfully.
+
 - **No rate limiting on this endpoint, unlike login.** Deliberate, not
   an oversight: login's rate limiting defends against password guessing,
   which is feasible because passwords are low-entropy and human-chosen.

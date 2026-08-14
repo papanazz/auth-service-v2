@@ -26,6 +26,11 @@ func testConfig() *config.Config {
 	cfg.Security.Register.IP.Limit = 5
 	cfg.Security.Register.IP.Window = 10 * time.Minute
 
+	cfg.EmailVerification.TokenTTL = 24 * time.Hour
+
+	cfg.EmailVerification.Resend.Limit = 3
+	cfg.EmailVerification.Resend.Window = 10 * time.Minute
+
 	return cfg
 }
 
@@ -150,6 +155,49 @@ func TestNewRegisterSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
 
 	if policy.IP.Window != cfg.Security.Register.IP.Window {
 		t.Errorf("IP window = %v, want %v", policy.IP.Window, cfg.Security.Register.IP.Window)
+	}
+
+	if policy.EmailVerificationTokenTTL != cfg.EmailVerification.TokenTTL {
+		t.Errorf(
+			"email verification token TTL = %v, want %v",
+			policy.EmailVerificationTokenTTL,
+			cfg.EmailVerification.TokenTTL,
+		)
+	}
+}
+
+func TestNewResendVerificationSecurityPolicy_WiresEveryField(t *testing.T) {
+
+	policy := newResendVerificationSecurityPolicy(testConfig())
+
+	if missing := zeroFields(
+		reflect.ValueOf(policy),
+		"",
+	); len(missing) > 0 {
+
+		t.Errorf(
+			"SecurityPolicy fields left unwired by newResendVerificationSecurityPolicy: %v",
+			missing,
+		)
+	}
+}
+
+func TestNewResendVerificationSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
+
+	cfg := testConfig()
+
+	policy := newResendVerificationSecurityPolicy(cfg)
+
+	if policy.IP.Limit != cfg.EmailVerification.Resend.Limit {
+		t.Errorf("IP limit = %v, want %v", policy.IP.Limit, cfg.EmailVerification.Resend.Limit)
+	}
+
+	if policy.IP.Window != cfg.EmailVerification.Resend.Window {
+		t.Errorf("IP window = %v, want %v", policy.IP.Window, cfg.EmailVerification.Resend.Window)
+	}
+
+	if policy.TokenTTL != cfg.EmailVerification.TokenTTL {
+		t.Errorf("token TTL = %v, want %v", policy.TokenTTL, cfg.EmailVerification.TokenTTL)
 	}
 }
 

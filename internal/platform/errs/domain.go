@@ -65,4 +65,13 @@ var (
 		CodeIdempotencyKeyRequired,
 		"the Idempotency-Key header is required",
 	)
+
+	// ErrInvalidVerificationToken deliberately covers unknown, expired,
+	// and already-consumed tokens alike — a client cannot distinguish
+	// these from each other, mirroring ErrInvalidRefreshToken's stance
+	// on refresh tokens.
+	ErrInvalidVerificationToken = New(
+		CodeInvalidVerificationToken,
+		"invalid or expired verification token",
+	)
 )

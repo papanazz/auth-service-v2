@@ -11,13 +11,14 @@ import (
 )
 
 type Config struct {
-	App           AppConfig
-	Server        ServerConfig
-	Database      DatabaseConfig
-	Redis         RedisConfig
-	Security      SecurityConfig
-	Idempotency   IdempotencyConfig
-	Observability ObservabilityConfig
+	App               AppConfig
+	Server            ServerConfig
+	Database          DatabaseConfig
+	Redis             RedisConfig
+	Security          SecurityConfig
+	Idempotency       IdempotencyConfig
+	EmailVerification EmailVerificationConfig
+	Observability     ObservabilityConfig
 }
 
 type AppConfig struct {
@@ -141,6 +142,27 @@ type IdempotencyConfig struct {
 	TTL time.Duration `env:"IDEMPOTENCY_KEY_TTL" envDefault:"10m"`
 }
 
+type EmailVerificationConfig struct {
+	// TokenTTL bounds how long an issued verification token stays valid.
+	// Also the TTL of its short-lived raw-value cache in Redis (see
+	// domain/verification.Cache) — the two are the same window by
+	// construction.
+	TokenTTL time.Duration `env:"EMAIL_VERIFICATION_TOKEN_TTL" envDefault:"24h"`
+
+	Resend ResendVerificationConfig
+}
+
+// ResendVerificationConfig caps how many resend requests a single IP may
+// attempt in the window, regardless of whether the email exists or is
+// already verified — the response is identical in every case (see
+// docs/email-verification.md), so the rate limit is the only thing
+// standing between this endpoint and being used to spam an arbitrary
+// inbox with verification emails.
+type ResendVerificationConfig struct {
+	Limit  int           `env:"RESEND_VERIFICATION_IP_LIMIT" envDefault:"3"`
+	Window time.Duration `env:"RESEND_VERIFICATION_IP_WINDOW" envDefault:"10m"`
+}
+
 type ObservabilityConfig struct {
 	OTLPExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4317"`
 }
@@ -192,6 +214,10 @@ func (c *Config) Validate() error {
 
 	if c.Idempotency.TTL <= 0 {
 		return errors.New("IDEMPOTENCY_KEY_TTL must be positive")
+	}
+
+	if c.EmailVerification.TokenTTL <= 0 {
+		return errors.New("EMAIL_VERIFICATION_TOKEN_TTL must be positive")
 	}
 
 	// A refresh token is only honoured while its session is still active, so a
