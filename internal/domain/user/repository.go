@@ -42,6 +42,14 @@ type Repository interface {
 		status Status,
 	) error
 
+	// UpdateLastLoginAt records a successful authentication. Called
+	// best-effort, after login's own transaction has committed — not
+	// critical enough to hold up or fail a login that already succeeded.
+	UpdateLastLoginAt(
+		ctx context.Context,
+		userID uuid.UUID,
+	) error
+
 	// Transaction support: verifying an email atomically consumes its
 	// token and marks the user verified.
 	WithTx(

@@ -66,9 +66,15 @@ func (m *mockTransactionManager) WithinTransaction(
 //
 
 type mockUserRepository struct {
+	mu sync.Mutex
+
 	account *user.User
 
 	findErr error
+
+	updateLastLoginAtErr error
+
+	updateLastLoginAtCalls []uuid.UUID
 }
 
 func (m *mockUserRepository) FindByEmail(
@@ -111,6 +117,19 @@ func (m *mockUserRepository) MarkEmailVerified(
 ) error {
 
 	return nil
+}
+
+func (m *mockUserRepository) UpdateLastLoginAt(
+	ctx context.Context,
+	userID uuid.UUID,
+) error {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.updateLastLoginAtCalls = append(m.updateLastLoginAtCalls, userID)
+
+	return m.updateLastLoginAtErr
 }
 
 func (m *mockUserRepository) WithTx(

@@ -144,6 +144,17 @@ func (r *UserRepository) MarkEmailVerified(
 	)
 }
 
+func (r *UserRepository) UpdateLastLoginAt(
+	ctx context.Context,
+	userID uuid.UUID,
+) error {
+
+	return r.query.UpdateLastLoginAt(
+		ctx,
+		userID,
+	)
+}
+
 func (r *UserRepository) WithTx(
 	tx pgx.Tx,
 ) user.Repository {

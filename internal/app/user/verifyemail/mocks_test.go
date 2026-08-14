@@ -195,6 +195,14 @@ func (m *mockUserRepository) MarkEmailVerified(
 	return nil
 }
 
+func (m *mockUserRepository) UpdateLastLoginAt(
+	ctx context.Context,
+	userID uuid.UUID,
+) error {
+
+	return nil
+}
+
 func (m *mockUserRepository) WithTx(
 	tx pgx.Tx,
 ) user.Repository {

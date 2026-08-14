@@ -491,7 +491,12 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 8. Publish audit event
+	// 8. Publish audit event and record the last login timestamp
+	//
+	// Both best-effort, both after the transaction commits: neither is
+	// critical enough to fail a login that already succeeded, and
+	// last_login_at is explicitly documented (queries/user.sql) as not
+	// belonging inside the transaction that creates the session/token.
 	//
 
 	_ =
@@ -503,6 +508,12 @@ func (s *LoginService) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
+		)
+
+	_ =
+		s.users.UpdateLastLoginAt(
+			ctx,
+			account.ID,
 		)
 
 	return &Result{

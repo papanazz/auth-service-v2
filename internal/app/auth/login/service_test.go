@@ -97,6 +97,52 @@ func TestLoginService_Handle_Success(t *testing.T) {
 	}
 }
 
+func TestLoginService_Handle_RecordsLastLoginAt(t *testing.T) {
+
+	h := newHarness()
+
+	account := h.activeAccount("bayu@example.com")
+
+	if _, err := h.service().Handle(
+		context.Background(),
+		validCommand(),
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(h.users.updateLastLoginAtCalls) != 1 {
+		t.Fatalf("UpdateLastLoginAt called %d times, want 1", len(h.users.updateLastLoginAtCalls))
+	}
+
+	if h.users.updateLastLoginAtCalls[0] != account.ID {
+		t.Errorf("UpdateLastLoginAt called with %v, want %v", h.users.updateLastLoginAtCalls[0], account.ID)
+	}
+}
+
+// A failure recording the timestamp is not critical (see queries/user.sql's
+// own comment) and must not fail a login that already succeeded.
+func TestLoginService_Handle_TolerateLastLoginAtFailure(t *testing.T) {
+
+	h := newHarness()
+
+	h.activeAccount("bayu@example.com")
+
+	h.users.updateLastLoginAtErr = errBackendDown
+
+	result, err := h.service().Handle(
+		context.Background(),
+		validCommand(),
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected a result despite the UpdateLastLoginAt failure")
+	}
+}
+
 // Regression test for the refresh bug: a session created by login carried a
 // zero ExpiresAt, which made every later refresh look expired.
 func TestLoginService_Handle_SessionCarriesExpiry(t *testing.T) {
@@ -605,6 +651,10 @@ func TestLoginService_Handle_LockedAccountIsNotRateLimitedButIsAudited(t *testin
 
 	if event.UserID == nil || *event.UserID != account.ID {
 		t.Errorf("event user ID = %v, want %v", event.UserID, account.ID)
+	}
+
+	if len(h.users.updateLastLoginAtCalls) != 0 {
+		t.Errorf("UpdateLastLoginAt called %d times, want 0 — the login did not succeed", len(h.users.updateLastLoginAtCalls))
 	}
 }
 
