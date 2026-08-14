@@ -114,6 +114,10 @@ func (s *LoginService) Handle(
 	cmd Command,
 ) (*Result, error) {
 
+	//
+	// 1. Normalize and validate input
+	//
+
 	email :=
 		strings.ToLower(
 			strings.TrimSpace(
@@ -125,13 +129,15 @@ func (s *LoginService) Handle(
 		Validate(
 			email,
 			cmd.Password,
+			cmd.DeviceID,
+			cmd.DeviceType,
 		); err != nil {
 
 		return nil, err
 	}
 
 	//
-	// 1. Rate limit check
+	// 2. Rate limit check
 	//
 
 	allowed, err :=
@@ -174,7 +180,7 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 2. Find account
+	// 3. Find account
 	//
 
 	account, err :=
@@ -210,7 +216,7 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 3. Verify password
+	// 4. Verify password
 	//
 
 	if err :=
@@ -241,10 +247,6 @@ func (s *LoginService) Handle(
 			errs.ErrInvalidCredentials
 	}
 
-	//
-	// 4. Authentication success
-	//
-
 	_ =
 		s.attemptTracker.Reset(
 			ctx,
@@ -253,6 +255,40 @@ func (s *LoginService) Handle(
 				cmd.IPAddress,
 			),
 		)
+
+	//
+	// 5. Account status check
+	//
+	// Deliberately after password verification, not before: revealing
+	// "this account is locked" to a caller who has not yet proven they
+	// know the password would hand out account-existence information for
+	// free. This does not count against the credential rate limiter — the
+	// password was correct, so treating it as a guessing failure would let
+	// anyone who already knows a locked account's password lock out its
+	// legitimate owner by hammering this path.
+	//
+
+	if !account.CanLogin(time.Now()) {
+
+		_ =
+			s.audit.Publish(
+				ctx,
+				loginFailedEvent(
+					&account.ID,
+					email,
+					cmd.IPAddress,
+					cmd.UserAgent,
+					errs.ErrAccountLocked.Message,
+				),
+			)
+
+		return nil,
+			errs.ErrAccountLocked
+	}
+
+	//
+	// 6. Authentication success
+	//
 
 	sessionID :=
 		uuid.New()
@@ -294,7 +330,7 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 5. Persist authentication state
+	// 7. Persist authentication state
 	//
 
 	err =
@@ -458,7 +494,7 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 6. Publish audit event
+	// 8. Publish audit event
 	//
 
 	_ =

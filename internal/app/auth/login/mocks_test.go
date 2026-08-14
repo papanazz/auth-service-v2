@@ -623,6 +623,23 @@ func (h *harness) activeAccount(email string) *user.User {
 	return account
 }
 
+// lockedAccount registers an account whose credentials are correct but
+// whose status blocks CanLogin — e.g. a lockout from repeated failures, or
+// an admin action. Correct password + blocked status is exactly the state
+// the account-status gate exists to catch.
+func (h *harness) lockedAccount(email string) *user.User {
+
+	account := h.activeAccount(email)
+
+	lockedUntil := time.Now().Add(time.Hour)
+
+	account.Status = user.StatusLocked
+
+	account.LockedUntil = &lockedUntil
+
+	return account
+}
+
 // activeSessionForDevice seeds an already-active session for the given
 // account/device, created at createdAt, so device-collision tests can
 // exercise the supersede/reject fork without going through a real login.

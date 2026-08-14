@@ -413,6 +413,38 @@ func TestLoginService_Handle_Failures(t *testing.T) {
 			wantErr: errs.ErrInvalidRequest,
 		},
 		{
+			name: "rejects an empty device ID",
+
+			setup: func(h *harness) Command {
+				cmd := validCommand()
+				cmd.DeviceID = "  "
+				return cmd
+			},
+
+			wantErr: errs.ErrInvalidRequest,
+		},
+		{
+			name: "rejects an unknown device type",
+
+			setup: func(h *harness) Command {
+				cmd := validCommand()
+				cmd.DeviceType = "TOASTER"
+				return cmd
+			},
+
+			wantErr: errs.ErrInvalidRequest,
+		},
+		{
+			name: "rejects a locked account with the correct password",
+
+			setup: func(h *harness) Command {
+				h.lockedAccount("bayu@example.com")
+				return validCommand()
+			},
+
+			wantErr: errs.ErrAccountLocked,
+		},
+		{
 			name: "rejects an unknown account without revealing it",
 
 			setup: func(h *harness) Command {
@@ -538,6 +570,41 @@ func TestLoginService_Handle_UnknownAccountRunsDummyVerification(t *testing.T) {
 
 	if h.passwords.seen[0] != dummyPasswordHash {
 		t.Errorf("verified against %q, want the dummy hash", h.passwords.seen[0])
+	}
+}
+
+// The correct password against a locked account must not count as a
+// credential-guessing failure — the caller proved they know the password,
+// so charging it against the rate limiter would let anyone who already
+// knows a locked account's password lock out its legitimate owner by
+// hammering this path. It must still show up in the audit trail.
+func TestLoginService_Handle_LockedAccountIsNotRateLimitedButIsAudited(t *testing.T) {
+
+	h := newHarness()
+
+	account := h.lockedAccount("bayu@example.com")
+
+	_, err := h.service().Handle(
+		context.Background(),
+		validCommand(),
+	)
+
+	if !errors.Is(err, errs.ErrAccountLocked) {
+		t.Fatalf("error = %v, want %v", err, errs.ErrAccountLocked)
+	}
+
+	if len(h.tracker.failures) != 0 {
+		t.Errorf("credential failures recorded = %d, want 0 — the password was correct", len(h.tracker.failures))
+	}
+
+	if got := h.audit.types(); len(got) != 1 || got[0] != audit.EventLoginFailed {
+		t.Fatalf("audit events = %v, want a single LOGIN_FAILED", got)
+	}
+
+	event := h.audit.events[0]
+
+	if event.UserID == nil || *event.UserID != account.ID {
+		t.Errorf("event user ID = %v, want %v", event.UserID, account.ID)
 	}
 }
 

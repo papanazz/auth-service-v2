@@ -14,6 +14,24 @@ const (
 	DeviceWeb     DeviceType = "WEB"
 )
 
+// Valid reports whether d is one of the known device types. The sessions
+// table stores this as a Postgres enum, so an invalid value fails at
+// INSERT time with a raw constraint error; checking here lets the caller
+// reject it as an ordinary 400 instead.
+func (d DeviceType) Valid() bool {
+
+	switch d {
+
+	case DeviceAndroid, DeviceIOS, DeviceWeb:
+
+		return true
+
+	default:
+
+		return false
+	}
+}
+
 type RevokeReason string
 
 const (
