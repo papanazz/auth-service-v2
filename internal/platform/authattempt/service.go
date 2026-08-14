@@ -3,11 +3,13 @@ package authattempt
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	"github.com/papanazz/auth-service-v2/internal/domain/security"
+	"github.com/papanazz/auth-service-v2/internal/platform/metrics"
 )
 
 var _ auth.AttemptTracker = (*RedisTracker)(nil)
@@ -16,10 +18,13 @@ type RedisTracker struct {
 	client *redis.Client
 
 	script *redis.Script
+
+	metrics *metrics.Metrics
 }
 
 func NewRedisTracker(
 	client *redis.Client,
+	m *metrics.Metrics,
 ) *RedisTracker {
 
 	return &RedisTracker{
@@ -29,6 +34,8 @@ func NewRedisTracker(
 		script: redis.NewScript(
 			incrementScript,
 		),
+
+		metrics: m,
 	}
 }
 
@@ -56,7 +63,38 @@ func (r *RedisTracker) Check(
 		return false, err
 	}
 
-	return count < policy.Limit, nil
+	allowed := count < policy.Limit
+
+	if !allowed {
+
+		r.metrics.RateLimitRejectionsTotal.
+			WithLabelValues(
+				limiterFromKey(key),
+			).
+			Inc()
+	}
+
+	return allowed, nil
+}
+
+// limiterFromKey classifies a rate-limit key for the RateLimitRejectionsTotal
+// label without ever exposing the identifying suffix (an IP address or a
+// credential hash) that makes each key unique — that suffix is exactly
+// what a Prometheus label must never carry, since it would turn a handful
+// of bounded time series into one per caller. Every key produced by this
+// package (see key.go) has the shape "auth:<endpoint>:<limiter>:<value>";
+// this keeps the first three segments and drops the rest.
+func limiterFromKey(
+	key string,
+) string {
+
+	parts := strings.SplitN(key, ":", 4)
+
+	if len(parts) < 3 {
+		return "unknown"
+	}
+
+	return strings.Join(parts[:3], ":")
 }
 
 func (r *RedisTracker) RecordFailure(

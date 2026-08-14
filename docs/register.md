@@ -119,7 +119,10 @@ login are separate steps; this endpoint returns no tokens.
 - Password policy enforcement (`platform/password.Policy`).
 - Argon2id password hashing — the raw password never reaches the
   repository or the database.
-- Audit trail entry (`USER_REGISTERED`) with email, IP, and user agent.
+- Audit trail entry (`USER_REGISTERED`) with email, IP, and user agent —
+  also exported as `auth_events_total{type="USER_REGISTERED"}` and the
+  IP limiter as `auth_rate_limit_rejections_total{limiter="auth:register:ip"}`;
+  see `docs/metrics.md`.
 - Issues a hashed, TTL-bound email verification token in the same
   transaction as account creation, caches its raw value, and publishes
   it via `domain/email.Publisher` — see `docs/email-verification.md`.

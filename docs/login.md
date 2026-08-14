@@ -186,7 +186,9 @@ for one device, zero errors, exactly one active session.
   provider-specific rules — currently Gmail/Googlemail) shared with
   register via `user.NormalizeEmail()`.
 - Two-tier Redis rate limiting (IP, credential+IP) via
-  `platform/authattempt`.
+  `platform/authattempt`, each independently observable as
+  `auth_rate_limit_rejections_total{limiter="auth:login:ip"}` /
+  `{limiter="auth:login:credential"}` — see `docs/metrics.md`.
 - Constant-time dummy-hash verification against unknown accounts, so
   account existence isn't inferable from response timing.
 - Account status gate (`CanLogin`).
@@ -199,7 +201,8 @@ for one device, zero errors, exactly one active session.
   consumed and extended by `/v1/auth/refresh`; see `docs/refresh.md`.
 - Full audit trail: `LOGIN_SUCCESS`, `LOGIN_FAILED` (wrong password,
   locked account, device conflict — each with a distinguishing
-  `Reason`).
+  `Reason`), also exported as `auth_events_total{type,success}` — see
+  `docs/metrics.md` for why `Reason` deliberately isn't a metric label.
 - Idempotent retries via `Idempotency-Key` (see Idempotency above).
 - `last_login_at` is updated on every successful login (flow step 8),
   best-effort and after the transaction commits — see Decisions.

@@ -131,6 +131,11 @@ CAS-guarded resource to fall back on).
 - Full audit trail: `TOKEN_REFRESH` (success), `TOKEN_REFRESH_FAILED`
   (unknown/expired/revoked token or session), `TOKEN_REUSE_DETECTED`
   (replay) — each carrying user ID, session ID, IP, and user agent.
+  `TOKEN_REUSE_DETECTED` is also its own alertable
+  `auth_events_total{type="TOKEN_REUSE_DETECTED"}` series, distinct from
+  the routine `TOKEN_REFRESH_FAILED` count even though both return the
+  same `401` — see `docs/metrics.md`, which this endpoint's replay
+  handling was the main motivation for.
 
 ## Gaps
 

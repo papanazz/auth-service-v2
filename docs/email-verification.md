@@ -171,13 +171,16 @@ value was re-logged (`e2e-resend-*@example.com`, same
   Concurrency.
 - Idempotent, enumeration-safe resend: identical `204` response
   regardless of account state; per-IP rate limiting
-  (`RESEND_VERIFICATION_IP_LIMIT`/`_WINDOW`, default 3/10m).
+  (`RESEND_VERIFICATION_IP_LIMIT`/`_WINDOW`, default 3/10m), observable
+  as `auth_rate_limit_rejections_total{limiter="auth:resend-verification:ip"}`
+  — see `docs/metrics.md`.
 - Email delivery is abstracted behind `domain/email.Publisher` — not
   implemented yet by design (see Gaps). Register and resend both depend
   on the interface only.
 - Full audit trail: `EMAIL_VERIFIED` (verify success only, not the
   idempotent-replay path), `VERIFICATION_EMAIL_SENT` (resend, real sends
-  only, not the no-op paths).
+  only, not the no-op paths) — both also exported as
+  `auth_events_total{type,success}`; see `docs/metrics.md`.
 - Verifying activates a `PENDING` account (`user.VerifyEmail()`); has no
   effect on an already-`ACTIVE` account's status (register currently
   always creates `ACTIVE` accounts — see `docs/register.md` Decisions —

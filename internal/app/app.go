@@ -98,6 +98,9 @@ func New(
 		return nil, err
 	}
 
+	appMetrics :=
+		metrics.New()
+
 	// =========================
 	// Security providers
 	// =========================
@@ -160,8 +163,11 @@ func New(
 		)
 
 	auditPublisher :=
-		auditRepo.NewAuditPublisher(
-			queries,
+		metrics.NewAuditPublisher(
+			auditRepo.NewAuditPublisher(
+				queries,
+			),
+			appMetrics,
 		)
 
 		// =========================
@@ -180,6 +186,7 @@ func New(
 	attemptTracker :=
 		authattempt.NewRedisTracker(
 			redisClient.Client,
+			appMetrics,
 		)
 
 	idempotencyStore :=
@@ -286,7 +293,7 @@ func New(
 
 		DB: db,
 
-		Metrics: metrics.New(),
+		Metrics: appMetrics,
 
 		RegisterService: registerService,
 

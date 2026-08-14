@@ -90,7 +90,10 @@ kill.
 - Revokes the whole refresh-token family, not just the presented token —
   a stolen-but-not-yet-used sibling token stops working too.
 - Full audit trail: `LOGOUT` (success and failure), carrying
-  `session_id`, IP, and user agent.
+  `session_id`, IP, and user agent — also exported as
+  `auth_events_total{type="LOGOUT",success}` (see `docs/metrics.md`;
+  success and failure share the same event type here, same as they do
+  in the audit log, so the `success` label is what tells them apart).
 
 ## Gaps
 
