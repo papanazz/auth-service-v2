@@ -3,7 +3,6 @@ package register
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
@@ -93,10 +92,8 @@ func (s *RegisterService) Handle(
 	//
 
 	email :=
-		strings.ToLower(
-			strings.TrimSpace(
-				cmd.Email,
-			),
+		user.NormalizeEmail(
+			cmd.Email,
 		)
 
 	if err := Validate(email); err != nil {

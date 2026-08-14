@@ -3,7 +3,6 @@ package login
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,10 +118,8 @@ func (s *LoginService) Handle(
 	//
 
 	email :=
-		strings.ToLower(
-			strings.TrimSpace(
-				cmd.Email,
-			),
+		user.NormalizeEmail(
+			cmd.Email,
 		)
 
 	if err :=

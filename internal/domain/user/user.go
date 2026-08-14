@@ -1,7 +1,6 @@
 package user
 
 import (
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,7 +53,7 @@ func New(
 
 		ID: uuid.New(),
 
-		Email: normalizeEmail(email),
+		Email: NormalizeEmail(email),
 
 		PasswordHash: passwordHash,
 
@@ -64,15 +63,6 @@ func New(
 
 		UpdatedAt: now,
 	}
-}
-
-func normalizeEmail(
-	email string,
-) string {
-
-	return strings.ToLower(
-		strings.TrimSpace(email),
-	)
 }
 
 func (u User) CanLogin(
