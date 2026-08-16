@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -45,7 +46,7 @@ func (r *UserRepository) Create(
 
 				Email: account.Email,
 
-				PasswordHash: account.PasswordHash,
+				PasswordHash: pgTextFromPointer(account.PasswordHash),
 
 				Status: sqlc.UserStatus(
 					account.Status,
@@ -181,6 +182,39 @@ func (r *UserRepository) WithTx(
 	}
 }
 
+// pgTextFromPointer and pointerFromPgText convert between a nullable Go
+// *string and pgtype.Text — sqlc resolves a nullable TEXT column to
+// pgtype.Text rather than *string under pgx/v5 (unlike every other
+// nullable column here, which does resolve to a plain Go pointer type;
+// not worth chasing in sqlc.yaml, so the conversion is contained here at
+// the repository boundary instead).
+
+func pgTextFromPointer(
+	s *string,
+) pgtype.Text {
+
+	if s == nil {
+		return pgtype.Text{}
+	}
+
+	return pgtype.Text{
+		String: *s,
+
+		Valid: true,
+	}
+}
+
+func pointerFromPgText(
+	t pgtype.Text,
+) *string {
+
+	if !t.Valid {
+		return nil
+	}
+
+	return &t.String
+}
+
 func mapUser(
 	row sqlc.User,
 ) *user.User {
@@ -191,7 +225,7 @@ func mapUser(
 
 		Email: row.Email,
 
-		PasswordHash: row.PasswordHash,
+		PasswordHash: pointerFromPgText(row.PasswordHash),
 
 		Status: user.Status(
 			row.Status,

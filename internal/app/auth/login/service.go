@@ -232,10 +232,47 @@ func (s *LoginService) Handle(
 	//
 	// 4. Verify password
 	//
+	// An OAuth-only account (docs/oauth.md) has no password at all —
+	// PasswordHash is nil. That must fail exactly like a wrong password,
+	// not panic on a nil dereference and not reveal "this account has
+	// no password": both would hand out account-existence/shape
+	// information for free, the same enumeration-safety stance already
+	// applied to an unknown account above.
+	//
+
+	if account.PasswordHash == nil {
+
+		_ =
+			s.passwords.Verify(
+				dummyPasswordHash,
+				cmd.Password,
+			)
+
+		_ =
+			s.attemptTracker.RecordFailure(
+				ctx,
+				authattempt.LoginCredential(
+					email,
+					cmd.IPAddress,
+				),
+				s.policy.Credential,
+			)
+
+		s.recordFailure(
+			ctx,
+			&account.ID,
+			email,
+			cmd,
+			errs.ErrInvalidCredentials.Message,
+		)
+
+		return nil,
+			errs.ErrInvalidCredentials
+	}
 
 	if err :=
 		s.passwords.Verify(
-			account.PasswordHash,
+			*account.PasswordHash,
 			cmd.Password,
 		); err != nil {
 

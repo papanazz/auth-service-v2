@@ -25,7 +25,12 @@ type User struct {
 
 	Email string
 
-	PasswordHash string
+	// PasswordHash is nil for an account created via an OAuth provider
+	// that has never set a password — see docs/oauth.md. Every reader of
+	// this field (login's password verification, in particular) must
+	// treat nil as "this account cannot authenticate by password" and
+	// nothing else — never dereference it unconditionally.
+	PasswordHash *string
 
 	Status Status
 
@@ -55,7 +60,33 @@ func New(
 
 		Email: NormalizeEmail(email),
 
-		PasswordHash: passwordHash,
+		PasswordHash: &passwordHash,
+
+		Status: StatusPending,
+
+		CreatedAt: now,
+
+		UpdatedAt: now,
+	}
+}
+
+// NewOAuth builds an account with no password at all — one that can
+// only ever authenticate via a linked OAuth identity (docs/oauth.md).
+// PasswordHash stays nil; login's password-verification step must
+// guard against that explicitly rather than dereferencing it.
+func NewOAuth(
+	email string,
+) User {
+
+	now := time.Now().UTC()
+
+	return User{
+
+		ID: uuid.New(),
+
+		Email: NormalizeEmail(email),
+
+		PasswordHash: nil,
 
 		Status: StatusPending,
 

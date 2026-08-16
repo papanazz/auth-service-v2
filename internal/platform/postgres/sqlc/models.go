@@ -171,6 +171,15 @@ type EmailVerificationToken struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type OauthIdentity struct {
+	ID             uuid.UUID          `json:"id"`
+	UserID         uuid.UUID          `json:"user_id"`
+	Provider       string             `json:"provider"`
+	ProviderUserID string             `json:"provider_user_id"`
+	Email          string             `json:"email"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type RefreshToken struct {
 	ID            uuid.UUID                    `json:"id"`
 	SessionID     uuid.UUID                    `json:"session_id"`
@@ -202,12 +211,12 @@ type Session struct {
 }
 
 type User struct {
-	ID              uuid.UUID  `json:"id"`
-	Email           string     `json:"email"`
-	PasswordHash    string     `json:"password_hash"`
-	Status          UserStatus `json:"status"`
-	EmailVerifiedAt *time.Time `json:"email_verified_at"`
-	LastLoginAt     *time.Time `json:"last_login_at"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID              uuid.UUID   `json:"id"`
+	Email           string      `json:"email"`
+	PasswordHash    pgtype.Text `json:"password_hash"`
+	Status          UserStatus  `json:"status"`
+	EmailVerifiedAt *time.Time  `json:"email_verified_at"`
+	LastLoginAt     *time.Time  `json:"last_login_at"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }

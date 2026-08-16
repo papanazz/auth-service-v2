@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -48,11 +49,11 @@ RETURNING id, email, password_hash, status, email_verified_at, last_login_at, cr
 `
 
 type CreateUserParams struct {
-	ID              uuid.UUID  `json:"id"`
-	Email           string     `json:"email"`
-	PasswordHash    string     `json:"password_hash"`
-	Status          UserStatus `json:"status"`
-	EmailVerifiedAt *time.Time `json:"email_verified_at"`
+	ID              uuid.UUID   `json:"id"`
+	Email           string      `json:"email"`
+	PasswordHash    pgtype.Text `json:"password_hash"`
+	Status          UserStatus  `json:"status"`
+	EmailVerifiedAt *time.Time  `json:"email_verified_at"`
 }
 
 // =====================================================

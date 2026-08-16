@@ -685,13 +685,17 @@ func (h *harness) service() *LoginService {
 	)
 }
 
+func passwordHashPtr(hash string) *string {
+	return &hash
+}
+
 // activeAccount registers a login-capable account with the given password hash.
 func (h *harness) activeAccount(email string) *user.User {
 
 	account := &user.User{
 		ID:           uuid.New(),
 		Email:        email,
-		PasswordHash: "hashed:correct-password",
+		PasswordHash: passwordHashPtr("hashed:correct-password"),
 		Status:       user.StatusActive,
 	}
 

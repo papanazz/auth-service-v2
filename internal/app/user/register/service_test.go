@@ -699,12 +699,16 @@ func TestRegisterService_PersistsNormalizedAccount(t *testing.T) {
 		t.Errorf("stored email = %q, want normalized", stored.Email)
 	}
 
-	if stored.PasswordHash == plaintext {
+	if stored.PasswordHash == nil {
+		t.Fatal("password hash is nil")
+	}
+
+	if *stored.PasswordHash == plaintext {
 		t.Fatal("password was stored in clear text")
 	}
 
-	if stored.PasswordHash != "hashed:"+plaintext {
-		t.Errorf("stored hash = %q, want the hasher output", stored.PasswordHash)
+	if *stored.PasswordHash != "hashed:"+plaintext {
+		t.Errorf("stored hash = %q, want the hasher output", *stored.PasswordHash)
 	}
 
 	if stored.Status != user.StatusActive {
