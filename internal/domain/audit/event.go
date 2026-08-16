@@ -32,6 +32,16 @@ const (
 	EventEmailVerified EventType = "EMAIL_VERIFIED"
 
 	EventVerificationEmailSent EventType = "VERIFICATION_EMAIL_SENT"
+
+	// EventOAuthAccountLinked fires only when an existing account gains
+	// a new linked identity (docs/adr/0001-oauth-client-and-account-linking.md
+	// case 3, the auto-link branch) — a genuinely new fact about the
+	// account that no other event type captures. A returning user
+	// signing in via an already-linked identity, or a brand-new account
+	// created via OAuth, are both ordinary EventLoginSuccess /
+	// EventUserRegistered — OAuth isn't a different kind of login or
+	// registration, so it doesn't get its own event type for those.
+	EventOAuthAccountLinked EventType = "OAUTH_ACCOUNT_LINKED"
 )
 
 type Event struct {

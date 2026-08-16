@@ -29,7 +29,9 @@ func StatusForError(
 		errs.CodeInvalidEmail,
 		errs.CodeWeakPassword,
 		errs.CodeIdempotencyKeyRequired,
-		errs.CodeInvalidVerificationToken:
+		errs.CodeInvalidVerificationToken,
+		errs.CodeInvalidOAuthState,
+		errs.CodeOAuthProviderUnsupported:
 
 		return http.StatusBadRequest
 

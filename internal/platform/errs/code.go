@@ -36,4 +36,8 @@ const (
 	CodeIdempotencyKeyRequired Code = "IDEMPOTENCY_KEY_REQUIRED"
 
 	CodeInvalidVerificationToken Code = "INVALID_VERIFICATION_TOKEN"
+
+	CodeInvalidOAuthState Code = "INVALID_OAUTH_STATE"
+
+	CodeOAuthProviderUnsupported Code = "OAUTH_PROVIDER_UNSUPPORTED"
 )

@@ -74,4 +74,19 @@ var (
 		CodeInvalidVerificationToken,
 		"invalid or expired verification token",
 	)
+
+	// ErrInvalidOAuthState covers an unknown, expired, and
+	// already-consumed state alike, the same stance as
+	// ErrInvalidVerificationToken above — a client cannot and must not
+	// be able to distinguish "this was a replay" from "this just timed
+	// out."
+	ErrInvalidOAuthState = New(
+		CodeInvalidOAuthState,
+		"invalid or expired oauth state",
+	)
+
+	ErrOAuthProviderUnsupported = New(
+		CodeOAuthProviderUnsupported,
+		"unsupported oauth provider",
+	)
 )
