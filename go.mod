@@ -20,9 +20,11 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
