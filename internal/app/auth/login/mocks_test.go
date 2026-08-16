@@ -22,6 +22,42 @@ import (
 // errBackendDown stands in for any unexpected infrastructure failure.
 var errBackendDown = errors.New("connection refused")
 
+type loggedError struct {
+	message string
+
+	err error
+
+	metadata map[string]any
+}
+
+// mockLogger satisfies domain/logging.Logger — every best-effort call
+// login swallows now logs through this instead of silently discarding
+// the error, so tests can assert it actually happened.
+type mockLogger struct {
+	mu sync.Mutex
+
+	errors []loggedError
+}
+
+func (m *mockLogger) Error(
+	ctx context.Context,
+	message string,
+	err error,
+	metadata map[string]any,
+) {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.errors = append(m.errors, loggedError{
+		message: message,
+
+		err: err,
+
+		metadata: metadata,
+	})
+}
+
 //
 // Transaction manager
 //
@@ -581,6 +617,8 @@ type harness struct {
 
 	tracker *mockAttemptTracker
 
+	logger *mockLogger
+
 	policy SecurityPolicy
 }
 
@@ -604,6 +642,8 @@ func newHarness() *harness {
 		audit: &mockAuditPublisher{},
 
 		tracker: newMockAttemptTracker(),
+
+		logger: &mockLogger{},
 
 		policy: SecurityPolicy{
 			IP: security.LimitPolicy{
@@ -640,6 +680,7 @@ func (h *harness) service() *LoginService {
 		mockRefreshHasher{},
 		h.audit,
 		h.tracker,
+		h.logger,
 		h.policy,
 	)
 }

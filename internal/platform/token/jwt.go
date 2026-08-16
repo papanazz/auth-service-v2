@@ -1,6 +1,7 @@
 package token
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -104,7 +105,7 @@ func (s *JWTService) Generate(
 	if err != nil {
 
 		return domainToken.AccessToken{},
-			err
+			fmt.Errorf("sign access token: %w", err)
 	}
 
 	return domainToken.AccessToken{

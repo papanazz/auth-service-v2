@@ -2,11 +2,13 @@ package logout
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/papanazz/auth-service-v2/internal/app/transaction"
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 	"github.com/papanazz/auth-service-v2/internal/domain/session"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -30,6 +32,8 @@ type Service struct {
 	refreshHasher refresh_token.Hasher
 
 	audit audit.Publisher
+
+	logger logging.Logger
 }
 
 func NewService(
@@ -38,6 +42,7 @@ func NewService(
 	sessions session.Repository,
 	refreshHasher refresh_token.Hasher,
 	audit audit.Publisher,
+	logger logging.Logger,
 ) *Service {
 
 	return &Service{
@@ -50,6 +55,8 @@ func NewService(
 		refreshHasher: refreshHasher,
 
 		audit: audit,
+
+		logger: logger,
 	}
 }
 
@@ -81,7 +88,14 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-		_ = s.audit.Publish(
+
+		// A genuine repository failure is not "unknown token" — see
+		// login's identical fix (docs/logging.md).
+		if !errors.Is(err, errs.ErrRefreshTokenNotFound) {
+			return err
+		}
+
+		if auditErr := s.audit.Publish(
 			ctx,
 			logoutFailedEvent(
 				nil,
@@ -89,7 +103,10 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); auditErr != nil {
+
+			s.logger.Error(ctx, "[Logout] audit publish failed", auditErr, nil)
+		}
 
 		return errs.ErrInvalidRefreshToken
 	}
@@ -109,7 +126,12 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-		_ = s.audit.Publish(
+
+		if !errors.Is(err, errs.ErrSessionNotFound) {
+			return err
+		}
+
+		if auditErr := s.audit.Publish(
 			ctx,
 			logoutFailedEvent(
 				&current.SessionID,
@@ -117,7 +139,12 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); auditErr != nil {
+
+			s.logger.Error(ctx, "[Logout] audit publish failed", auditErr, map[string]any{
+				"session_id": current.SessionID,
+			})
+		}
 
 		return errs.ErrInvalidRefreshToken
 	}
@@ -173,7 +200,7 @@ func (s *Service) Handle(
 	// 4. Publish audit event
 	//
 
-	_ =
+	if err :=
 		s.audit.Publish(
 			ctx,
 			logoutSuccessEvent(
@@ -182,7 +209,14 @@ func (s *Service) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Logout] audit publish failed", err, map[string]any{
+			"user_id": sessionData.UserID,
+
+			"session_id": sessionData.ID,
+		})
+	}
 
 	return nil
 }

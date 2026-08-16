@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,7 +55,11 @@ func (r *UserRepository) Create(
 			},
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+
+	return nil
 }
 
 func (r *UserRepository) FindByID(
@@ -82,7 +87,7 @@ func (r *UserRepository) FindByID(
 				errs.ErrUserNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 
 	return mapUser(row), nil
@@ -114,7 +119,7 @@ func (r *UserRepository) FindByEmail(
 				errs.ErrUserNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get user by email: %w", err)
 
 	}
 
@@ -129,7 +134,7 @@ func (r *UserRepository) MarkEmailVerified(
 	status user.Status,
 ) error {
 
-	return r.query.MarkEmailVerified(
+	err := r.query.MarkEmailVerified(
 		ctx,
 		sqlc.MarkEmailVerifiedParams{
 
@@ -142,6 +147,12 @@ func (r *UserRepository) MarkEmailVerified(
 			),
 		},
 	)
+
+	if err != nil {
+		return fmt.Errorf("mark email verified: %w", err)
+	}
+
+	return nil
 }
 
 func (r *UserRepository) UpdateLastLoginAt(
@@ -149,10 +160,16 @@ func (r *UserRepository) UpdateLastLoginAt(
 	userID uuid.UUID,
 ) error {
 
-	return r.query.UpdateLastLoginAt(
+	err := r.query.UpdateLastLoginAt(
 		ctx,
 		userID,
 	)
+
+	if err != nil {
+		return fmt.Errorf("update last login at: %w", err)
+	}
+
+	return nil
 }
 
 func (r *UserRepository) WithTx(

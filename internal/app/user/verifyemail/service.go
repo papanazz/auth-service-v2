@@ -9,6 +9,7 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/app/transaction"
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/domain/verification"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
@@ -47,6 +48,8 @@ type Service struct {
 	hasher verification.Hasher
 
 	audit audit.Publisher
+
+	logger logging.Logger
 }
 
 func NewService(
@@ -55,6 +58,7 @@ func NewService(
 	users user.Repository,
 	hasher verification.Hasher,
 	audit audit.Publisher,
+	logger logging.Logger,
 ) *Service {
 
 	return &Service{
@@ -67,6 +71,8 @@ func NewService(
 		hasher: hasher,
 
 		audit: audit,
+
+		logger: logger,
 	}
 }
 
@@ -207,7 +213,7 @@ func (s *Service) Handle(
 	// 5. Publish audit event
 	//
 
-	_ =
+	if err :=
 		s.audit.Publish(
 			ctx,
 			emailVerifiedEvent(
@@ -216,7 +222,12 @@ func (s *Service) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[VerifyEmail] audit publish failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
 
 	return &Result{
 

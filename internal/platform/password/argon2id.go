@@ -60,7 +60,7 @@ func (a *Argon2id) Hash(
 		)
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("generate password salt: %w", err)
 	}
 
 	hash :=

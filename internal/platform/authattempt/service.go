@@ -3,6 +3,7 @@ package authattempt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -60,7 +61,7 @@ func (r *RedisTracker) Check(
 			return true, nil
 		}
 
-		return false, err
+		return false, fmt.Errorf("check rate limit count: %w", err)
 	}
 
 	allowed := count < policy.Limit
@@ -110,7 +111,11 @@ func (r *RedisTracker) RecordFailure(
 			policy,
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("record auth attempt failure: %w", err)
+	}
+
+	return nil
 }
 
 func (r *RedisTracker) Reset(
@@ -118,11 +123,16 @@ func (r *RedisTracker) Reset(
 	key string,
 ) error {
 
-	return r.client.Del(
+	err := r.client.Del(
 		ctx,
 		key,
 	).Err()
 
+	if err != nil {
+		return fmt.Errorf("reset rate limit counter: %w", err)
+	}
+
+	return nil
 }
 
 func (r *RedisTracker) increment(
@@ -134,16 +144,22 @@ func (r *RedisTracker) increment(
 	error,
 ) {
 
-	return r.script.Run(
-		ctx,
-		r.client,
-		[]string{
-			key,
-		},
-		int(
-			policy.Window.Seconds(),
-		),
-	).
-		Int()
+	count, err :=
+		r.script.Run(
+			ctx,
+			r.client,
+			[]string{
+				key,
+			},
+			int(
+				policy.Window.Seconds(),
+			),
+		).
+			Int()
 
+	if err != nil {
+		return 0, fmt.Errorf("run rate limit increment script: %w", err)
+	}
+
+	return count, nil
 }

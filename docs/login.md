@@ -123,6 +123,16 @@ for one device, zero errors, exactly one active session.
 
 ## Decisions
 
+- **A genuine `FindByEmail` failure is not "unknown account."** Step 3
+  used to treat any error from the lookup — Postgres unreachable
+  included — as grounds to run the dummy-hash check and return
+  `ErrInvalidCredentials`, which meant a real outage silently looked
+  like a routine wrong-password wave, both to the client (`401` instead
+  of `500`) and in the logs (`WARN` instead of `ERROR`). Fixed to check
+  `errors.Is(err, errs.ErrUserNotFound)` first; anything else propagates
+  unchanged. See `docs/logging.md` NotFound vs. genuine failure —
+  verified live against a stopped Postgres container.
+
 - **Email canonicalization is per-domain, not universal.** See
   `docs/register.md` Decisions for the full rationale — the same
   `user.NormalizeEmail()` function backs both endpoints, so a user can

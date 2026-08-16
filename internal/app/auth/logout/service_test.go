@@ -202,6 +202,28 @@ func TestService_Handle_Rejections(t *testing.T) {
 			wantErr: errs.ErrInvalidRefreshToken,
 		},
 		{
+			// A genuine repository failure must not be conflated with
+			// "unknown token" — see docs/logging.md.
+			name: "propagates a genuine token lookup failure unmasked",
+
+			setup: func(h *harness) Command {
+				h.refreshTokens.findErr = errBackendDown
+				return Command{RefreshToken: h.rawToken}
+			},
+
+			wantErr: errBackendDown,
+		},
+		{
+			name: "propagates a genuine session lookup failure unmasked",
+
+			setup: func(h *harness) Command {
+				h.sessions.findErr = errBackendDown
+				return Command{RefreshToken: h.rawToken}
+			},
+
+			wantErr: errBackendDown,
+		},
+		{
 			name: "propagates a transaction failure",
 
 			setup: func(h *harness) Command {

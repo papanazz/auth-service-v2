@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -63,7 +64,11 @@ func (r *VerificationRepository) Create(
 			},
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create verification token: %w", err)
+	}
+
+	return nil
 }
 
 func (r *VerificationRepository) FindByHash(
@@ -91,7 +96,7 @@ func (r *VerificationRepository) FindByHash(
 				errs.ErrVerificationTokenNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get verification token by hash: %w", err)
 	}
 
 	return mapToken(row), nil
@@ -122,7 +127,7 @@ func (r *VerificationRepository) FindActiveByUserID(
 				errs.ErrVerificationTokenNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get active verification token by user id: %w", err)
 	}
 
 	return mapToken(row), nil
@@ -143,7 +148,7 @@ func (r *VerificationRepository) Consume(
 		)
 
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("consume verification token: %w", err)
 	}
 
 	return rows == 1, nil

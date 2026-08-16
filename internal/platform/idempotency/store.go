@@ -3,6 +3,7 @@ package idempotency
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -75,7 +76,7 @@ func (s *Store) TryClaim(
 		)
 
 	if err != nil {
-		return false, nil, err
+		return false, nil, fmt.Errorf("marshal idempotency placeholder: %w", err)
 	}
 
 	result, err :=
@@ -93,7 +94,7 @@ func (s *Store) TryClaim(
 			Text()
 
 	if err != nil {
-		return false, nil, err
+		return false, nil, fmt.Errorf("run idempotency claim script: %w", err)
 	}
 
 	if result == "" {
@@ -108,7 +109,7 @@ func (s *Store) TryClaim(
 			&record,
 		); err != nil {
 
-		return false, nil, err
+		return false, nil, fmt.Errorf("unmarshal idempotency record: %w", err)
 	}
 
 	return false, &record, nil
@@ -129,15 +130,20 @@ func (s *Store) Save(
 		)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal idempotency record: %w", err)
 	}
 
-	return s.client.Set(
+	if err := s.client.Set(
 		ctx,
 		key,
 		data,
 		ttl,
-	).Err()
+	).Err(); err != nil {
+
+		return fmt.Errorf("save idempotency record: %w", err)
+	}
+
+	return nil
 }
 
 // Release drops a reservation without caching an outcome, so the next
@@ -148,8 +154,13 @@ func (s *Store) Release(
 	key string,
 ) error {
 
-	return s.client.Del(
+	if err := s.client.Del(
 		ctx,
 		key,
-	).Err()
+	).Err(); err != nil {
+
+		return fmt.Errorf("release idempotency claim: %w", err)
+	}
+
+	return nil
 }

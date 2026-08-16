@@ -21,6 +21,42 @@ var errBackendDown = errors.New("connection refused")
 
 const testRefreshTTL = 720 * time.Hour
 
+type loggedError struct {
+	message string
+
+	err error
+
+	metadata map[string]any
+}
+
+// mockLogger satisfies domain/logging.Logger — every best-effort call
+// refresh swallows now logs through this instead of silently discarding
+// the error, so tests can assert it actually happened.
+type mockLogger struct {
+	mu sync.Mutex
+
+	errors []loggedError
+}
+
+func (m *mockLogger) Error(
+	ctx context.Context,
+	message string,
+	err error,
+	metadata map[string]any,
+) {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.errors = append(m.errors, loggedError{
+		message: message,
+
+		err: err,
+
+		metadata: metadata,
+	})
+}
+
 //
 // Transaction manager
 //
@@ -101,7 +137,7 @@ func (m *mockRefreshRepository) FindByHash(
 	found, ok := m.tokens[hash]
 
 	if !ok {
-		return nil, errs.ErrInvalidRefreshToken
+		return nil, errs.ErrRefreshTokenNotFound
 	}
 
 	// Return a copy so callers cannot mutate stored state by accident.
@@ -443,6 +479,8 @@ type harness struct {
 
 	audit *mockAuditPublisher
 
+	logger *mockLogger
+
 	// the token handed to the caller, and the session that owns it
 	rawToken string
 
@@ -467,6 +505,8 @@ func newHarness() *harness {
 		generator: &mockRefreshGenerator{},
 
 		audit: &mockAuditPublisher{},
+
+		logger: &mockLogger{},
 	}
 
 	now := time.Now().UTC()
@@ -518,6 +558,7 @@ func (h *harness) service() *Service {
 		h.generator,
 		mockRefreshHasher{},
 		h.audit,
+		h.logger,
 		testRefreshTTL,
 	)
 }

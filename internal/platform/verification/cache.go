@@ -3,6 +3,7 @@ package verification
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,12 +34,17 @@ func (c *RedisCache) StoreRawToken(
 	ttl time.Duration,
 ) error {
 
-	return c.client.Set(
+	if err := c.client.Set(
 		ctx,
 		key(tokenID),
 		rawToken,
 		ttl,
-	).Err()
+	).Err(); err != nil {
+
+		return fmt.Errorf("store verification token in cache: %w", err)
+	}
+
+	return nil
 }
 
 func (c *RedisCache) GetRawToken(
@@ -66,7 +72,7 @@ func (c *RedisCache) GetRawToken(
 			return "", false, nil
 		}
 
-		return "", false, err
+		return "", false, fmt.Errorf("get verification token from cache: %w", err)
 	}
 
 	return value, true, nil

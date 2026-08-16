@@ -62,6 +62,14 @@ kill.
 
 ## Decisions
 
+- **A genuine repository failure is not "unknown token."** Same fix as
+  refresh's identical bug (`docs/refresh.md` Decisions,
+  `docs/logging.md` NotFound vs. genuine failure): flow steps 1 and 2
+  used to fold any `FindByHash`/`FindByID` error into
+  `ErrInvalidRefreshToken`, masking a real outage as a routine
+  already-logged-out call. Fixed to check the specific NotFound
+  sentinel first.
+
 - **Logout does not gate on `EmailVerifiedAt`.** An unverified account
   can log out exactly like a verified one — deliberate, same reasoning
   as login and refresh; see `docs/email-verification.md` Decisions.

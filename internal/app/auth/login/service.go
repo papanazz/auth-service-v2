@@ -13,6 +13,7 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
 	"github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 	"github.com/papanazz/auth-service-v2/internal/domain/session"
@@ -65,6 +66,8 @@ type LoginService struct {
 
 	attemptTracker auth.AttemptTracker
 
+	logger logging.Logger
+
 	policy SecurityPolicy
 }
 
@@ -79,6 +82,7 @@ func NewService(
 	refreshHasher refresh_token.Hasher,
 	audit audit.Publisher,
 	attemptTracker auth.AttemptTracker,
+	logger logging.Logger,
 	policy SecurityPolicy,
 ) *LoginService {
 
@@ -103,6 +107,8 @@ func NewService(
 		audit: audit,
 
 		attemptTracker: attemptTracker,
+
+		logger: logger,
 
 		policy: policy,
 	}
@@ -188,6 +194,17 @@ func (s *LoginService) Handle(
 
 	if err != nil {
 
+		// A genuine lookup failure (Postgres unreachable, a timeout, ...)
+		// is not "unknown account" — conflating the two used to mean an
+		// infra outage silently returned 401 INVALID_CREDENTIALS to
+		// every caller instead of 500, and logged at Warn instead of
+		// Error, hiding a real incident inside routine login-failure
+		// noise. Only ErrUserNotFound gets the enumeration-safe
+		// treatment below; anything else propagates as-is.
+		if !errors.Is(err, errs.ErrUserNotFound) {
+			return nil, err
+		}
+
 		//
 		// Important:
 		// Run dummy Argon2 verification
@@ -222,7 +239,7 @@ func (s *LoginService) Handle(
 			cmd.Password,
 		); err != nil {
 
-		_ =
+		if err :=
 			s.attemptTracker.RecordFailure(
 				ctx,
 				authattempt.LoginCredential(
@@ -230,7 +247,10 @@ func (s *LoginService) Handle(
 					cmd.IPAddress,
 				),
 				s.policy.Credential,
-			)
+			); err != nil {
+
+			s.logger.Error(ctx, "[Login] credential rate limit counter increment failed", err, nil)
+		}
 
 		s.recordFailure(
 			ctx,
@@ -244,14 +264,23 @@ func (s *LoginService) Handle(
 			errs.ErrInvalidCredentials
 	}
 
-	_ =
+	if err :=
 		s.attemptTracker.Reset(
 			ctx,
 			authattempt.LoginCredential(
 				email,
 				cmd.IPAddress,
 			),
-		)
+		); err != nil {
+
+		// Not fatal — the counter merely fails to clear, so a legitimate
+		// user could see a stale credential-limit warning sooner than
+		// deserved on a subsequent attempt. Worth knowing about, not
+		// worth failing an otherwise-successful login over.
+		s.logger.Error(ctx, "[Login] credential rate limit counter reset failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
 
 	//
 	// 5. Account status check
@@ -267,7 +296,7 @@ func (s *LoginService) Handle(
 
 	if !account.CanLogin(time.Now()) {
 
-		_ =
+		if err :=
 			s.audit.Publish(
 				ctx,
 				loginFailedEvent(
@@ -277,7 +306,12 @@ func (s *LoginService) Handle(
 					cmd.UserAgent,
 					errs.ErrAccountLocked.Message,
 				),
-			)
+			); err != nil {
+
+			s.logger.Error(ctx, "[Login] audit publish failed", err, map[string]any{
+				"user_id": account.ID,
+			})
+		}
 
 		return nil,
 			errs.ErrAccountLocked
@@ -474,7 +508,7 @@ func (s *LoginService) Handle(
 
 		if errors.Is(err, errs.ErrDeviceSessionActive) {
 
-			_ =
+			if auditErr :=
 				s.audit.Publish(
 					ctx,
 					loginFailedEvent(
@@ -484,7 +518,12 @@ func (s *LoginService) Handle(
 						cmd.UserAgent,
 						errs.ErrDeviceSessionActive.Message,
 					),
-				)
+				); auditErr != nil {
+
+				s.logger.Error(ctx, "[Login] audit publish failed", auditErr, map[string]any{
+					"user_id": account.ID,
+				})
+			}
 		}
 
 		return nil, err
@@ -499,7 +538,7 @@ func (s *LoginService) Handle(
 	// belonging inside the transaction that creates the session/token.
 	//
 
-	_ =
+	if err :=
 		s.audit.Publish(
 			ctx,
 			loginSuccessEvent(
@@ -508,13 +547,25 @@ func (s *LoginService) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
 
-	_ =
+		s.logger.Error(ctx, "[Login] audit publish failed", err, map[string]any{
+			"user_id": account.ID,
+
+			"session_id": sessionID,
+		})
+	}
+
+	if err :=
 		s.users.UpdateLastLoginAt(
 			ctx,
 			account.ID,
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Login] update last login at failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
 
 	return &Result{
 
@@ -538,7 +589,7 @@ func (s *LoginService) recordFailure(
 	reason string,
 ) {
 
-	_ =
+	if err :=
 		s.attemptTracker.RecordFailure(
 			ctx,
 			authattempt.LoginCredential(
@@ -546,9 +597,12 @@ func (s *LoginService) recordFailure(
 				cmd.IPAddress,
 			),
 			s.policy.Credential,
-		)
+		); err != nil {
 
-	_ =
+		s.logger.Error(ctx, "[Login] credential rate limit counter increment failed", err, nil)
+	}
+
+	if err :=
 		s.audit.Publish(
 			ctx,
 			loginFailedEvent(
@@ -558,5 +612,8 @@ func (s *LoginService) recordFailure(
 				cmd.UserAgent,
 				reason,
 			),
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Login] audit publish failed", err, nil)
+	}
 }

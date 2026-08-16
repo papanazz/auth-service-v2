@@ -12,6 +12,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	domainEmail "github.com/papanazz/auth-service-v2/internal/domain/email"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/domain/verification"
@@ -59,6 +60,8 @@ type RegisterService struct {
 
 	attemptTracker auth.AttemptTracker
 
+	logger logging.Logger
+
 	policy SecurityPolicy
 }
 
@@ -85,6 +88,8 @@ func NewService(
 	audit audit.Publisher,
 
 	attemptTracker auth.AttemptTracker,
+
+	logger logging.Logger,
 
 	policy SecurityPolicy,
 
@@ -113,6 +118,8 @@ func NewService(
 		audit: audit,
 
 		attemptTracker: attemptTracker,
+
+		logger: logger,
 
 		policy: policy,
 	}
@@ -182,14 +189,17 @@ func (s *RegisterService) Handle(
 	// counter" — the name reflects login's only current use (count
 	// wrong-password guesses), not a hard requirement that the call
 	// represents a failure.
-	_ =
+	if err :=
 		s.attemptTracker.RecordFailure(
 			ctx,
 			authattempt.RegisterIP(
 				cmd.IPAddress,
 			),
 			s.policy.IP,
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Register] rate limit counter increment failed", err, nil)
+	}
 
 	//
 	// 3. Enforce password policy
@@ -335,7 +345,7 @@ func (s *RegisterService) Handle(
 	// run against a transaction that might still roll back.
 	//
 
-	_ =
+	if err :=
 		s.audit.Publish(
 			ctx,
 			registeredEvent(
@@ -344,17 +354,32 @@ func (s *RegisterService) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
 
-	_ =
+		s.logger.Error(ctx, "[Register] audit publish failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
+
+	if err :=
 		s.verificationCache.StoreRawToken(
 			ctx,
 			verificationToken.ID,
 			rawToken,
 			s.policy.EmailVerificationTokenTTL,
-		)
+		); err != nil {
 
-	_ =
+		// Not fatal to registration — resend's self-healing fallback
+		// mints a fresh token if this one's raw value is missing from
+		// the cache (docs/email-verification.md) — but worth knowing
+		// about, since it means the very first resend for this user
+		// will pay for a mint instead of reusing this token.
+		s.logger.Error(ctx, "[Register] verification token cache store failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
+
+	if err :=
 		s.emailPublisher.PublishVerificationEmail(
 			ctx,
 			domainEmail.VerificationEmail{
@@ -365,7 +390,12 @@ func (s *RegisterService) Handle(
 
 				ExpiresAt: verificationTokenExpiresAt,
 			},
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Register] verification email publish failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
 
 	return &Result{
 

@@ -3,6 +3,7 @@ package token
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 
 	refresh "github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 )
@@ -29,7 +30,7 @@ func (g *RandomGenerator) Generate() (
 		rand.Read(bytes)
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("generate random token: %w", err)
 	}
 
 	return base64.RawURLEncoding.EncodeToString(bytes), nil

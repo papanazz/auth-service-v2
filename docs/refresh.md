@@ -72,6 +72,17 @@ CAS-guarded resource to fall back on).
 
 ## Decisions
 
+- **A genuine repository failure is not "unknown token."** Flow steps 1
+  and 2 used to return `ErrInvalidRefreshToken` for *any*
+  `FindByHash`/`FindByID` error, not just a real miss — a Postgres
+  outage would have silently looked like every client presenting a
+  garbage token. Fixed to check `errors.Is(err, errs.ErrRefreshTokenNotFound)`
+  / `errs.ErrSessionNotFound` first; anything else propagates unchanged
+  (and now correctly logs at `Error`, not `Warn` — see `docs/logging.md`
+  NotFound vs. genuine failure). `errs.ErrRefreshTokenNotFound` is new —
+  `refresh_token.Repository.FindByHash` had no not-found sentinel at all
+  before this fix, unlike the session and verification repositories.
+
 - **Refresh does not gate on `EmailVerifiedAt`.** An unverified
   account's refresh token rotates exactly like a verified one's —
   deliberate, same reasoning as login and logout; see

@@ -2,11 +2,15 @@ package refresh_token
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
+	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 	"github.com/papanazz/auth-service-v2/internal/platform/postgres/sqlc"
 )
 
@@ -60,7 +64,11 @@ func (r *RefreshTokenRepository) Create(
 			},
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create refresh token: %w", err)
+	}
+
+	return nil
 }
 
 func (r *RefreshTokenRepository) FindByHash(
@@ -78,7 +86,12 @@ func (r *RefreshTokenRepository) FindByHash(
 		)
 
 	if err != nil {
-		return nil, err
+
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errs.ErrRefreshTokenNotFound
+		}
+
+		return nil, fmt.Errorf("get refresh token by hash: %w", err)
 	}
 
 	result := &refresh_token.Token{
@@ -140,7 +153,7 @@ func (r *RefreshTokenRepository) Consume(
 		)
 
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("consume refresh token: %w", err)
 	}
 
 	return rows == 1, nil
@@ -152,7 +165,7 @@ func (r *RefreshTokenRepository) RevokeFamily(
 	reason refresh_token.RevokeReason,
 ) error {
 
-	return r.query.RevokeRefreshTokenFamily(
+	err := r.query.RevokeRefreshTokenFamily(
 		ctx,
 		sqlc.RevokeRefreshTokenFamilyParams{
 
@@ -166,4 +179,10 @@ func (r *RefreshTokenRepository) RevokeFamily(
 			},
 		},
 	)
+
+	if err != nil {
+		return fmt.Errorf("revoke refresh token family: %w", err)
+	}
+
+	return nil
 }

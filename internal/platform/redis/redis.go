@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
@@ -54,16 +55,16 @@ func New(
 	// which this codebase never does — so Redis needed the same
 	// treatment explicitly. See docs/tracing.md.
 	if err := redisotel.InstrumentTracing(client, redisotel.WithDBStatement(false)); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("instrument redis tracing: %w", err)
 	}
 
 	if err := redisotel.InstrumentMetrics(client); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("instrument redis metrics: %w", err)
 	}
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
-		return nil, err
+		return nil, fmt.Errorf("ping redis: %w", err)
 	}
 
 	return &Cache{
@@ -78,5 +79,10 @@ func (r *Cache) Close() {
 func (r *Cache) Health(
 	ctx context.Context,
 ) error {
-	return r.Client.Ping(ctx).Err()
+
+	if err := r.Client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("ping redis: %w", err)
+	}
+
+	return nil
 }

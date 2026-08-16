@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 
 	domain "github.com/papanazz/auth-service-v2/internal/domain/audit"
 
@@ -35,5 +36,9 @@ func (p *AuditPublisher) Publish(
 			mapCreateParams(event),
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("publish authentication event: %w", err)
+	}
+
+	return nil
 }

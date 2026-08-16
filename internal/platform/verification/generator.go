@@ -3,6 +3,7 @@ package verification
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 
 	domain "github.com/papanazz/auth-service-v2/internal/domain/verification"
 )
@@ -26,7 +27,7 @@ func (g *RandomGenerator) Generate() (string, error) {
 		rand.Read(bytes)
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("generate verification token: %w", err)
 	}
 
 	return base64.RawURLEncoding.EncodeToString(bytes), nil

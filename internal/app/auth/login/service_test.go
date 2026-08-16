@@ -141,6 +141,15 @@ func TestLoginService_Handle_TolerateLastLoginAtFailure(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected a result despite the UpdateLastLoginAt failure")
 	}
+
+	// Tolerating it must not mean losing it silently.
+	if len(h.logger.errors) != 1 {
+		t.Fatalf("logged %d errors, want 1", len(h.logger.errors))
+	}
+
+	if !errors.Is(h.logger.errors[0].err, errBackendDown) {
+		t.Errorf("logged error = %v, want it to wrap %v", h.logger.errors[0].err, errBackendDown)
+	}
 }
 
 // Regression test for the refresh bug: a session created by login carried a
@@ -616,6 +625,43 @@ func TestLoginService_Handle_UnknownAccountRunsDummyVerification(t *testing.T) {
 
 	if h.passwords.seen[0] != dummyPasswordHash {
 		t.Errorf("verified against %q, want the dummy hash", h.passwords.seen[0])
+	}
+}
+
+// A genuine lookup failure (Postgres unreachable, a timeout, ...) must
+// not be conflated with "unknown account" — that used to mean an infra
+// outage silently returned 401 INVALID_CREDENTIALS to every caller
+// instead of 500, hiding a real incident inside routine login-failure
+// noise (docs/logging.md). Only errs.ErrUserNotFound gets the
+// enumeration-safe treatment.
+func TestLoginService_Handle_PropagatesAGenuineLookupFailureUnmasked(t *testing.T) {
+
+	h := newHarness()
+
+	h.users.findErr = errBackendDown
+
+	result, err := h.service().Handle(
+		context.Background(),
+		validCommand(),
+	)
+
+	if !errors.Is(err, errBackendDown) {
+		t.Fatalf("error = %v, want it to wrap %v", err, errBackendDown)
+	}
+
+	if errors.Is(err, errs.ErrInvalidCredentials) {
+		t.Error("a genuine lookup failure must not be reported as invalid credentials")
+	}
+
+	if result != nil {
+		t.Errorf("result = %+v, want nil on error", result)
+	}
+
+	// The dummy-hash verification exists purely to equalize timing
+	// between "unknown account" and "wrong password" — it has no reason
+	// to run for an infra failure that has nothing to do with either.
+	if len(h.passwords.seen) != 0 {
+		t.Errorf("verifier called %d times, want 0 — a real error should fail fast", len(h.passwords.seen))
 	}
 }
 

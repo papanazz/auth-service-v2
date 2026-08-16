@@ -5,7 +5,11 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 )
+
+var _ logging.Logger = (*Logger)(nil)
 
 type Logger struct {
 	logger *zap.Logger

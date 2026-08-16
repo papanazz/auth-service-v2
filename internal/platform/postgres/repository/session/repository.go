@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -40,7 +41,11 @@ func (r *SessionRepository) Create(
 			mapCreateParams(input),
 		)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SessionRepository) FindByID(
@@ -68,7 +73,7 @@ func (r *SessionRepository) FindByID(
 				errs.ErrSessionNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get session by id: %w", err)
 	}
 
 	return mapSession(row), nil
@@ -99,7 +104,7 @@ func (r *SessionRepository) FindActiveByID(
 				errs.ErrSessionNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get active session by id: %w", err)
 	}
 
 	return mapSession(row), nil
@@ -136,7 +141,7 @@ func (r *SessionRepository) FindActiveByUserAndDevice(
 				errs.ErrSessionNotFound
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("get active session by user and device: %w", err)
 	}
 
 	return mapSession(row), nil
@@ -148,10 +153,16 @@ func (r *SessionRepository) LockDeviceSlot(
 	deviceID string,
 ) error {
 
-	return r.query.LockDeviceSessionSlot(
+	err := r.query.LockDeviceSessionSlot(
 		ctx,
 		userID.String()+":"+deviceID,
 	)
+
+	if err != nil {
+		return fmt.Errorf("lock device session slot: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SessionRepository) Revoke(
@@ -162,7 +173,7 @@ func (r *SessionRepository) Revoke(
 
 	reasonValue := string(reason)
 
-	return r.query.RevokeSession(
+	err := r.query.RevokeSession(
 		ctx,
 		sqlc.RevokeSessionParams{
 
@@ -171,6 +182,12 @@ func (r *SessionRepository) Revoke(
 			RevokedReason: &reasonValue,
 		},
 	)
+
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SessionRepository) UpdateLastUsedAt(
@@ -178,10 +195,16 @@ func (r *SessionRepository) UpdateLastUsedAt(
 	id uuid.UUID,
 ) error {
 
-	return r.query.UpdateSessionLastUsedAt(
+	err := r.query.UpdateSessionLastUsedAt(
 		ctx,
 		id,
 	)
+
+	if err != nil {
+		return fmt.Errorf("update session last used at: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SessionRepository) UpdateLastRefreshedAt(
@@ -189,10 +212,16 @@ func (r *SessionRepository) UpdateLastRefreshedAt(
 	id uuid.UUID,
 ) error {
 
-	return r.query.UpdateSessionLastRefreshedAt(
+	err := r.query.UpdateSessionLastRefreshedAt(
 		ctx,
 		id,
 	)
+
+	if err != nil {
+		return fmt.Errorf("update session last refreshed at: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SessionRepository) WithTx(

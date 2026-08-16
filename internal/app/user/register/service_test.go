@@ -335,6 +335,42 @@ func (m *mockAttemptTracker) Reset(
 
 // harness bundles a full set of working mocks so tests only need to
 // override the one dependency their scenario cares about.
+type loggedError struct {
+	message string
+
+	err error
+
+	metadata map[string]any
+}
+
+// mockLogger satisfies domain/logging.Logger — every best-effort call a
+// service swallows now logs through this instead of silently
+// discarding the error, so tests can assert it actually happened.
+type mockLogger struct {
+	mu sync.Mutex
+
+	errors []loggedError
+}
+
+func (m *mockLogger) Error(
+	ctx context.Context,
+	message string,
+	err error,
+	metadata map[string]any,
+) {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.errors = append(m.errors, loggedError{
+		message: message,
+
+		err: err,
+
+		metadata: metadata,
+	})
+}
+
 type harness struct {
 	transaction *mockTransactionManager
 
@@ -355,6 +391,8 @@ type harness struct {
 	audit *mockAuditPublisher
 
 	tracker *mockAttemptTracker
+
+	logger *mockLogger
 
 	securityPolicy SecurityPolicy
 }
@@ -378,6 +416,8 @@ func newHarness() *harness {
 
 		tracker: &mockAttemptTracker{},
 
+		logger: &mockLogger{},
+
 		securityPolicy: testSecurityPolicy(),
 	}
 }
@@ -396,6 +436,7 @@ func (h *harness) service() *RegisterService {
 		h.policy,
 		h.audit,
 		h.tracker,
+		h.logger,
 		h.securityPolicy,
 	)
 }
@@ -755,7 +796,9 @@ func TestRegisterService_Handle_ToleratesCacheAndEmailFailures(t *testing.T) {
 
 		h := newHarness()
 
-		h.verificationCache.storeErr = errors.New("redis unreachable")
+		storeErr := errors.New("redis unreachable")
+
+		h.verificationCache.storeErr = storeErr
 
 		_, err := h.service().Handle(
 			context.Background(),
@@ -765,13 +808,25 @@ func TestRegisterService_Handle_ToleratesCacheAndEmailFailures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
+		// Tolerating the failure must not mean losing it silently — it
+		// has to show up in the logs, since it's the only place it will.
+		if len(h.logger.errors) != 1 {
+			t.Fatalf("logged %d errors, want 1", len(h.logger.errors))
+		}
+
+		if !errors.Is(h.logger.errors[0].err, storeErr) {
+			t.Errorf("logged error = %v, want it to wrap %v", h.logger.errors[0].err, storeErr)
+		}
 	})
 
 	t.Run("email publish failure", func(t *testing.T) {
 
 		h := newHarness()
 
-		h.emailPublisher.err = errors.New("smtp unreachable")
+		publishErr := errors.New("smtp unreachable")
+
+		h.emailPublisher.err = publishErr
 
 		_, err := h.service().Handle(
 			context.Background(),
@@ -780,6 +835,14 @@ func TestRegisterService_Handle_ToleratesCacheAndEmailFailures(t *testing.T) {
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(h.logger.errors) != 1 {
+			t.Fatalf("logged %d errors, want 1", len(h.logger.errors))
+		}
+
+		if !errors.Is(h.logger.errors[0].err, publishErr) {
+			t.Errorf("logged error = %v, want it to wrap %v", h.logger.errors[0].err, publishErr)
 		}
 	})
 }

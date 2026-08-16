@@ -18,6 +18,42 @@ import (
 
 var errBackendDown = errors.New("connection refused")
 
+type loggedError struct {
+	message string
+
+	err error
+
+	metadata map[string]any
+}
+
+// mockLogger satisfies domain/logging.Logger — every best-effort call
+// logout swallows now logs through this instead of silently discarding
+// the error, so tests can assert it actually happened.
+type mockLogger struct {
+	mu sync.Mutex
+
+	errors []loggedError
+}
+
+func (m *mockLogger) Error(
+	ctx context.Context,
+	message string,
+	err error,
+	metadata map[string]any,
+) {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.errors = append(m.errors, loggedError{
+		message: message,
+
+		err: err,
+
+		metadata: metadata,
+	})
+}
+
 //
 // Transaction manager
 //
@@ -81,7 +117,7 @@ func (m *mockRefreshRepository) FindByHash(
 	found, ok := m.tokens[hash]
 
 	if !ok {
-		return nil, errs.ErrInvalidRefreshToken
+		return nil, errs.ErrRefreshTokenNotFound
 	}
 
 	snapshot := *found
@@ -345,6 +381,8 @@ type harness struct {
 
 	audit *mockAuditPublisher
 
+	logger *mockLogger
+
 	rawToken string
 
 	current domainRefresh.Token
@@ -364,6 +402,8 @@ func newHarness() *harness {
 		sessions: newMockSessionRepository(),
 
 		audit: &mockAuditPublisher{},
+
+		logger: &mockLogger{},
 	}
 
 	now := time.Now().UTC()
@@ -413,5 +453,6 @@ func (h *harness) service() *Service {
 		h.sessions,
 		mockRefreshHasher{},
 		h.audit,
+		h.logger,
 	)
 }

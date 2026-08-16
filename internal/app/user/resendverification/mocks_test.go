@@ -16,6 +16,42 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 )
 
+type loggedError struct {
+	message string
+
+	err error
+
+	metadata map[string]any
+}
+
+// mockLogger satisfies domain/logging.Logger — every best-effort call
+// this service swallows now logs through this instead of silently
+// discarding the error, so tests can assert it actually happened.
+type mockLogger struct {
+	mu sync.Mutex
+
+	errors []loggedError
+}
+
+func (m *mockLogger) Error(
+	ctx context.Context,
+	message string,
+	err error,
+	metadata map[string]any,
+) {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.errors = append(m.errors, loggedError{
+		message: message,
+
+		err: err,
+
+		metadata: metadata,
+	})
+}
+
 //
 // User repository
 //
@@ -385,6 +421,8 @@ type harness struct {
 
 	tracker *mockAttemptTracker
 
+	logger *mockLogger
+
 	policy SecurityPolicy
 
 	account user.User
@@ -406,6 +444,8 @@ func newHarness() *harness {
 		audit: &mockAuditPublisher{},
 
 		tracker: &mockAttemptTracker{},
+
+		logger: &mockLogger{},
 
 		policy: SecurityPolicy{
 
@@ -448,6 +488,7 @@ func (h *harness) service() *Service {
 		h.emailPublisher,
 		h.audit,
 		h.tracker,
+		h.logger,
 		h.policy,
 	)
 }

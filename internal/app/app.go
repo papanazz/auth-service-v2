@@ -216,6 +216,7 @@ func New(
 			password.NewPolicy(),
 			auditPublisher,
 			attemptTracker,
+			log,
 			registerPolicy,
 		)
 
@@ -231,6 +232,7 @@ func New(
 			refreshHasher,
 			auditPublisher,
 			attemptTracker,
+			log,
 			loginPolicy,
 		)
 
@@ -251,6 +253,8 @@ func New(
 
 			auditPublisher,
 
+			log,
+
 			cfg.Security.RefreshToken.TTL,
 		)
 
@@ -266,6 +270,8 @@ func New(
 			refreshHasher,
 
 			auditPublisher,
+
+			log,
 		)
 
 	verifyEmailService :=
@@ -275,6 +281,7 @@ func New(
 			userRepository,
 			verificationHasher,
 			auditPublisher,
+			log,
 		)
 
 	resendVerificationService :=
@@ -287,6 +294,7 @@ func New(
 			emailPublisher,
 			auditPublisher,
 			attemptTracker,
+			log,
 			resendVerificationPolicy,
 		)
 

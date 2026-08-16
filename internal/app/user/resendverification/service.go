@@ -10,6 +10,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	domainEmail "github.com/papanazz/auth-service-v2/internal/domain/email"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 	"github.com/papanazz/auth-service-v2/internal/domain/verification"
 
@@ -42,6 +43,8 @@ type Service struct {
 
 	attemptTracker auth.AttemptTracker
 
+	logger logging.Logger
+
 	policy SecurityPolicy
 }
 
@@ -54,6 +57,7 @@ func NewService(
 	emailPublisher domainEmail.Publisher,
 	audit audit.Publisher,
 	attemptTracker auth.AttemptTracker,
+	logger logging.Logger,
 	policy SecurityPolicy,
 ) *Service {
 
@@ -73,6 +77,8 @@ func NewService(
 		audit: audit,
 
 		attemptTracker: attemptTracker,
+
+		logger: logger,
 
 		policy: policy,
 	}
@@ -116,12 +122,15 @@ func (s *Service) Handle(
 		return errs.ErrTooManyRequests
 	}
 
-	_ =
+	if err :=
 		s.attemptTracker.RecordFailure(
 			ctx,
 			authattempt.ResendVerificationIP(cmd.IPAddress),
 			s.policy.IP,
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[ResendVerification] rate limit counter increment failed", err, nil)
+	}
 
 	//
 	// 2. Resolve the account
@@ -160,7 +169,7 @@ func (s *Service) Handle(
 	// 4. Publish the email and audit the send
 	//
 
-	_ =
+	if err :=
 		s.emailPublisher.PublishVerificationEmail(
 			ctx,
 			domainEmail.VerificationEmail{
@@ -171,9 +180,14 @@ func (s *Service) Handle(
 
 				ExpiresAt: expiresAt,
 			},
-		)
+		); err != nil {
 
-	_ =
+		s.logger.Error(ctx, "[ResendVerification] verification email publish failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
+
+	if err :=
 		s.audit.Publish(
 			ctx,
 			verificationEmailSentEvent(
@@ -182,7 +196,12 @@ func (s *Service) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[ResendVerification] audit publish failed", err, map[string]any{
+			"user_id": account.ID,
+		})
+	}
 
 	return nil
 }
@@ -251,7 +270,12 @@ func (s *Service) reuseOrMint(
 
 	// Best-effort: a cache-store failure only costs a future resend the
 	// ability to reuse this exact token — it can still mint a new one.
-	_ = s.cache.StoreRawToken(ctx, token.ID, raw, s.policy.TokenTTL)
+	if err := s.cache.StoreRawToken(ctx, token.ID, raw, s.policy.TokenTTL); err != nil {
+
+		s.logger.Error(ctx, "[ResendVerification] verification token cache store failed", err, map[string]any{
+			"user_id": userID,
+		})
+	}
 
 	return raw, expiresAt, nil
 }

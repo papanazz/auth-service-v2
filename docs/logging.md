@@ -68,6 +68,72 @@ already carries `user.id`/`session.id` once a request gets far enough to
 audit-publish (`docs/tracing.md`) — that's the correlation path for
 those three today, not the log line.
 
+### Error wrapping through the platform layer
+
+Every repository and platform adapter (`internal/platform/postgres/repository/*`,
+`internal/platform/redis`, `internal/platform/authattempt`,
+`internal/platform/idempotency`, `internal/platform/token`,
+`internal/platform/password`, `internal/platform/refresh_token`,
+`internal/platform/verification`) now wraps a raw, unexpected error with
+one short static phrase before returning it —
+`fmt.Errorf("get user by email: %w", err)`, not just `return nil, err`.
+Sentinel translations (`sql.ErrNoRows` → `errs.ErrUserNotFound` and
+similar) are untouched — only the *fallback* path, the one that used to
+return the driver's bare error, gets a phrase. By the time an unexpected
+failure reaches `response.LogAndWriteError`, the log line reads like a
+breadcrumb — `"get user by email: dial tcp: connection refused"` — not
+just the bottom of the stack with no indication of which call produced
+it. See Decisions for the one place this is deliberately *not* done
+(`TransactionManager.WithinTransaction`'s `fn(tx)` return).
+
+### Best-effort logging — `domain/logging.Logger`
+
+Every use case (`register`, `login`, `refresh`, `logout`, `verifyemail`,
+`resendverification`) now takes a `domain/logging.Logger` — one method,
+`Error(ctx, message, err, metadata)` — and calls it wherever a
+best-effort side effect (an audit publish, a cache store, an email send,
+a rate-limit counter update) used to discard its error with a bare
+`_ = ...`. Nothing else about those call sites changed: the error still
+doesn't fail the request, since none of them were ever meant to. What
+changed is that failure is no longer invisible — before this, if the
+Postgres audit-log write failed during an outage, nothing anywhere
+recorded that fact; `metrics.AuditPublisher` and `tracing.AuditPublisher`
+both fire before forwarding to the real publisher (`docs/metrics.md`,
+`docs/tracing.md`), so even the metric and the trace span don't
+distinguish "recorded" from merely "attempted." The log line is now the
+one place that distinction survives.
+
+`domain/logging.Logger` lives in `domain`, not `platform` — the
+dependency-inversion rule in the top-level `CLAUDE.md` ("`domain` and
+`app` never import `platform` ... concretely") applies to `app`-layer
+use cases the same way it applies to everything else, so a use case
+logging couldn't just import `platform/logger` directly. `logger.Metadata`
+is a type *alias* for `map[string]any` (`internal/platform/logger/metadata.go`)
+specifically so `*logger.Logger` satisfies the domain interface with no
+adapter — Go's interface matching needs the exact type, and an alias
+means there are not two types to bridge, only one spelled two ways.
+
+### NotFound vs. genuine failure
+
+Three lookups — login's `FindByEmail`, and refresh's and logout's
+`FindByHash`/`FindByID` — used to treat *any* error from the repository,
+not just "not found," as the business outcome ("unknown account",
+"invalid token"). A real repository failure (Postgres unreachable, a
+timeout) was silently folded into the same 401 a wrong password or a
+stale token produces — misreporting a 500-class incident as routine
+auth failure, both to the client and, before this pass, to the log
+(`WARN` instead of `ERROR`, since the fold happened before severity was
+even decided). Fixed by checking `errors.Is(err, <specific NotFound
+sentinel>)` first — `errs.ErrUserNotFound`, `errs.ErrRefreshTokenNotFound`
+(new — `refresh_token.Repository.FindByHash` had no sentinel translation
+at all before this pass, see Decisions), `errs.ErrSessionNotFound` — and
+only taking the enumeration-safe/idempotent branch when it matches;
+anything else now propagates unchanged. `register` and `resendverification`
+already did this correctly; `verifyemail` did too. Verified live: a
+login attempt with Postgres stopped now returns `500` (previously would
+have been `401`), logged at `ERROR` with `"get user by email: failed to
+connect to ...: no such host"`.
+
 ### `logger.MaskEmail`
 
 Keeps the first one or two characters of the local part and the whole
@@ -135,6 +201,48 @@ different retention and access rules.
   severity-selection logic (Decisions above) testable without spinning
   up zap or asserting on captured stdout.
 
+- **`TransactionManager.WithinTransaction` never wraps `fn(tx)`'s
+  returned error, even though it wraps its own `BeginTx`/`Commit`
+  failures.** `fn` is the use case's own transactional closure — its
+  error might be a raw repository failure (already wrapped there, if
+  so) or a domain sentinel the use case deliberately returns from inside
+  the closure (login's `errs.ErrDeviceSessionActive`, for one).
+  `response.WriteError`/`StatusForError` type-assert `err.(*errs.Error)`
+  directly rather than using `errors.As` — wrapping here would silently
+  turn every such sentinel into an unwrapped `*fmt.wrapError`, which
+  fails that assertion and falls through to a `500` no matter what the
+  sentinel actually was. `WithinTransaction` has no way to tell which
+  case it's looking at, so passing `fn`'s error through completely
+  untouched is the only choice that can't misroute a real business
+  error into a wrong status code.
+
+- **Repository errors are wrapped with what the call was doing, not
+  which repository or table it touched.** `"get user by email: %w"`,
+  not `"UserRepository.FindByEmail: %w"` or `"users table: %w"` — the
+  phrase is meant to read naturally next to the wrapped message in one
+  log line, and the operation is more useful for that than the
+  implementation detail of which Go type or SQL table was involved.
+
+- **The NotFound-conflation bug existed in three places
+  (login/refresh/logout) but not in three others (register/verifyemail/
+  resendverification) that do the identical kind of lookup.** Worth
+  naming plainly: this wasn't a one-off typo, it was the same mistake
+  made three times and avoided three times, which is exactly the shape
+  of bug a shared pattern (or a lint rule, if one existed for it) would
+  have caught structurally instead of relying on each service getting
+  it right independently. Flagged here rather than silently fixed,
+  since the next new use case with a "does this exist" lookup is exactly
+  where it could recur.
+
+- **`errs.ErrRefreshTokenNotFound` is a new sentinel, not a reuse of
+  `errs.ErrInvalidRefreshToken`.** The two mock repositories (refresh's
+  and logout's) were themselves returning `ErrInvalidRefreshToken` —
+  the *client-facing* error — directly from a not-found lookup, before
+  this pass, which is exactly backwards: a repository has no business
+  deciding what a client sees, only the service layer does. Both mocks
+  were fixed alongside the new sentinel so the tests assert against the
+  same contract the real `RefreshTokenRepository` now honors.
+
 - **`/ready` was added to the per-request logging exclusion list in the
   same pass**, not filed as a separate gap. It's a direct, mechanical
   consequence of `docs/health.md` adding a Docker-polled endpoint
@@ -154,6 +262,20 @@ different retention and access rules.
 - `/health`, `/ready`, and `/metrics` — the three endpoints polled on a
   fixed interval by infrastructure, not requested by a real caller — are
   all excluded from the per-request log line.
+- A genuine repository failure can no longer be misreported as "unknown
+  account" or "invalid token" — verified live against Postgres actually
+  being down, not just reasoned about (see NotFound vs. genuine failure
+  above).
+- Unexpected errors carry a breadcrumb of which repository call produced
+  them (`"get user by email: %w"`), not just the bare driver message —
+  across every platform adapter, not only the ones on the hot path for
+  login/register.
+- Every best-effort side effect a use case swallows (audit publish,
+  verification-token cache store, email publish, rate-limit counter
+  update) is now logged at `Error` on failure instead of vanishing —
+  ~28 call sites across all six use cases, none of which required
+  changing what the use case actually does when they fail (still
+  best-effort, still doesn't fail the request).
 
 ## Gaps
 
@@ -164,6 +286,17 @@ different retention and access rules.
   question (does `Command`/`Result` grow a field only failure-path
   logging needs?) rather than a mechanical one, and out of scope for a
   logging-usage review. The trace span is the correlation path today.
+- **A failed transaction rollback is still unlogged.**
+  `TransactionManager.WithinTransaction`'s deferred `tx.Rollback(...)`
+  (`internal/platform/postgres/repository/transaction.go`) discards its
+  own error — reasonable low-priority scope cut, since a rollback is
+  only attempted when the transaction is already being abandoned (a
+  `Commit` or `fn(tx)` failure that's *already* logged/propagated), and
+  a rollback failing is itself usually a symptom of the same dead
+  connection that caused the original failure, not new information.
+  Would need the `TransactionManager` to take its own `logging.Logger`
+  to fix, a different injection point than the six use cases this pass
+  covers.
 - **No log line at all for a *successful* login/register/refresh** — the
   generic `http_request` INFO line is the only trace of a success in the
   log stream; the identifying detail (`user.id`, `session.id`) lives in
@@ -203,6 +336,22 @@ Unit — `internal/transport/http/response/errors_test.go`
   `err` parameter the way Error does, so this is added explicitly
 - a `nil` metadata map doesn't panic
 
+Unit — each of the six use cases' own test suite
+(`go test ./internal/app/... -race`), extended in this pass:
+
+- login: a genuine `FindByEmail` failure propagates unmasked — not
+  `ErrInvalidCredentials` — and the dummy-hash verification does not run
+  for it (`TestLoginService_Handle_PropagatesAGenuineLookupFailureUnmasked`);
+  a swallowed `UpdateLastLoginAt` failure is now asserted present in the
+  mock logger, not just tolerated
+  (`TestLoginService_Handle_TolerateLastLoginAtFailure`)
+- refresh and logout: a genuine `FindByHash`/`FindByID` failure
+  propagates unmasked, for both repositories independently
+  (`propagates a genuine token/session lookup failure unmasked`)
+- register: swallowed cache-store and email-publish failures are now
+  asserted present in the mock logger, not just tolerated
+  (`TestRegisterService_Handle_ToleratesCacheAndEmailFailures`)
+
 e2e — against the real docker-compose stack:
 
 - register success → duplicate-email retry → `409`, logged at `WARN`
@@ -214,12 +363,15 @@ e2e — against the real docker-compose stack:
   real JSON decode error
 - an unknown token to `/v1/user/verify-email` → `400`, logged at `WARN`
   with `error_code:"INVALID_VERIFICATION_TOKEN"`
-- `docker stop` the Redis container, then a login attempt → `500`,
-  logged at **`ERROR`** with the real driver message ("dial tcp: lookup
-  redis... no such host"), the masked email, and the same
-  `device_id`/`device_type`/`user_agent` fields the Warn path carries —
-  sitting distinctly apart, by level, from every 4xx logged in the same
-  window
+- `docker stop` the Postgres container, then a login attempt → `500`
+  (previously would have been a misleading `401`), logged at **`ERROR`**
+  with `"get user by email: failed to connect to \`user=postgres
+  database=auth_system\`: hostname resolving error: lookup postgres on
+  127.0.0.11:53: no such host"` — the wrapping phrase and the underlying
+  driver error in one line — sitting distinctly apart, by level, from a
+  `WARN`-logged wrong-password attempt captured in the same window with
+  the identical `device_id`/`device_type`/`user_agent`/masked-email
+  fields
 - confirmed zero `http_request` log lines for `path:"/ready"` despite
   Docker polling it every 5s throughout the test run
 
@@ -228,8 +380,18 @@ e2e — against the real docker-compose stack:
 ```
 internal/platform/logger/logger.go            Logger: Info/Debug/Warn/Error/Fatal
 internal/platform/logger/mask.go              MaskEmail
+internal/platform/logger/metadata.go          Metadata (alias for map[string]any)
 internal/platform/logger/context.go           log_id/trace_id/request_id correlation
+internal/domain/logging/logger.go             Logger — best-effort logging interface
 internal/transport/http/response/errors.go    StatusForError, LogAndWriteError
 internal/transport/http/middleware/logger.go  per-request line, exclusion list
 internal/transport/http/handler/*.go          decode-failure Warn, LogAndWriteError call sites
+internal/app/*/*/service.go                    logging.Logger on every best-effort call site
+internal/platform/postgres/repository/*        error wrapping, NotFound sentinel translation
+internal/platform/postgres/repository/transaction.go
+                                                BeginTx/Commit wrapped, fn(tx) deliberately not
+internal/platform/redis/, authattempt/, idempotency/, token/, password/,
+internal/platform/refresh_token/, verification/
+                                                error wrapping across every adapter
+internal/platform/errs/refresh.go             ErrRefreshTokenNotFound
 ```

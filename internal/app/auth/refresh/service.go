@@ -10,6 +10,7 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/app/transaction"
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
+	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 	"github.com/papanazz/auth-service-v2/internal/domain/session"
 	"github.com/papanazz/auth-service-v2/internal/domain/token"
@@ -45,6 +46,8 @@ type Service struct {
 
 	audit audit.Publisher
 
+	logger logging.Logger
+
 	refreshTTL time.Duration
 }
 
@@ -56,6 +59,7 @@ func NewService(
 	refreshGenerator refresh_token.Generator,
 	refreshHasher refresh_token.Hasher,
 	audit audit.Publisher,
+	logger logging.Logger,
 	refreshTTL time.Duration,
 ) *Service {
 
@@ -73,6 +77,8 @@ func NewService(
 		refreshHasher: refreshHasher,
 
 		audit: audit,
+
+		logger: logger,
 
 		refreshTTL: refreshTTL,
 	}
@@ -99,7 +105,16 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-		_ = s.audit.Publish(
+
+		// A genuine repository failure is not "unknown token" — see
+		// login's identical fix (docs/logging.md) for why conflating
+		// the two silently turns an infra outage into a routine-looking
+		// 401 instead of the 500 it should be.
+		if !errors.Is(err, errs.ErrRefreshTokenNotFound) {
+			return nil, err
+		}
+
+		if auditErr := s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
 				nil,
@@ -108,7 +123,10 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); auditErr != nil {
+
+			s.logger.Error(ctx, "[Refresh] audit publish failed", auditErr, nil)
+		}
 
 		return nil,
 			errs.ErrInvalidRefreshToken
@@ -132,7 +150,12 @@ func (s *Service) Handle(
 		)
 
 	if err != nil {
-		_ = s.audit.Publish(
+
+		if !errors.Is(err, errs.ErrSessionNotFound) {
+			return nil, err
+		}
+
+		if auditErr := s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
 				nil,
@@ -141,7 +164,12 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); auditErr != nil {
+
+			s.logger.Error(ctx, "[Refresh] audit publish failed", auditErr, map[string]any{
+				"session_id": current.SessionID,
+			})
+		}
 
 		return nil,
 			errs.ErrInvalidRefreshToken
@@ -158,14 +186,27 @@ func (s *Service) Handle(
 	//
 
 	if current.ConsumedAt != nil {
-		_ =
+
+		if err :=
 			s.refreshTokens.RevokeFamily(
 				ctx,
 				current.FamilyID,
 				refresh_token.RevokeReasonReplay,
-			)
+			); err != nil {
 
-		_ =
+			// Not best-effort in the usual sense — this IS the security
+			// response to a detected theft, so a failure here means a
+			// still-live sibling token in a compromised family. Worth
+			// its own distinct message, not folded into the generic
+			// audit-publish-failed line below.
+			s.logger.Error(ctx, "[Refresh] revoke family failed after replay detected", err, map[string]any{
+				"session_id": current.SessionID,
+
+				"family_id": current.FamilyID,
+			})
+		}
+
+		if err :=
 			s.audit.Publish(
 				ctx,
 				refreshReplayEvent(
@@ -174,7 +215,12 @@ func (s *Service) Handle(
 					cmd.IPAddress,
 					cmd.UserAgent,
 				),
-			)
+			); err != nil {
+
+			s.logger.Error(ctx, "[Refresh] audit publish failed", err, map[string]any{
+				"session_id": current.SessionID,
+			})
+		}
 
 		return nil,
 			errs.ErrRefreshTokenReplay
@@ -187,7 +233,7 @@ func (s *Service) Handle(
 	if current.RevokedAt != nil ||
 		current.ExpiresAt.Before(time.Now()) {
 
-		_ = s.audit.Publish(
+		if err := s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
 				&sessionData.UserID,
@@ -196,7 +242,14 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); err != nil {
+
+			s.logger.Error(ctx, "[Refresh] audit publish failed", err, map[string]any{
+				"user_id": sessionData.UserID,
+
+				"session_id": current.SessionID,
+			})
+		}
 
 		return nil,
 			errs.ErrInvalidRefreshToken
@@ -205,7 +258,7 @@ func (s *Service) Handle(
 	if sessionData.RevokedAt != nil ||
 		sessionData.ExpiresAt.Before(time.Now()) {
 
-		_ = s.audit.Publish(
+		if err := s.audit.Publish(
 			ctx,
 			refreshFailedEvent(
 				&sessionData.UserID,
@@ -214,7 +267,14 @@ func (s *Service) Handle(
 				cmd.UserAgent,
 				errs.ErrInvalidRefreshToken.Message,
 			),
-		)
+		); err != nil {
+
+			s.logger.Error(ctx, "[Refresh] audit publish failed", err, map[string]any{
+				"user_id": sessionData.UserID,
+
+				"session_id": current.SessionID,
+			})
+		}
 
 		return nil,
 			errs.ErrInvalidRefreshToken
@@ -311,14 +371,21 @@ func (s *Service) Handle(
 			errs.ErrRefreshTokenReplay,
 		) {
 
-			_ =
+			if revokeErr :=
 				s.refreshTokens.RevokeFamily(
 					ctx,
 					current.FamilyID,
 					refresh_token.RevokeReasonReplay,
-				)
+				); revokeErr != nil {
 
-			_ =
+				s.logger.Error(ctx, "[Refresh] revoke family failed after replay detected", revokeErr, map[string]any{
+					"session_id": current.SessionID,
+
+					"family_id": current.FamilyID,
+				})
+			}
+
+			if auditErr :=
 				s.audit.Publish(
 					ctx,
 					refreshReplayEvent(
@@ -327,7 +394,12 @@ func (s *Service) Handle(
 						cmd.IPAddress,
 						cmd.UserAgent,
 					),
-				)
+				); auditErr != nil {
+
+				s.logger.Error(ctx, "[Refresh] audit publish failed", auditErr, map[string]any{
+					"session_id": current.SessionID,
+				})
+			}
 
 		}
 
@@ -356,7 +428,7 @@ func (s *Service) Handle(
 	// 8. Publish audit event
 	//
 
-	_ =
+	if err :=
 		s.audit.Publish(
 			ctx,
 			refreshSuccessEvent(
@@ -365,7 +437,14 @@ func (s *Service) Handle(
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
-		)
+		); err != nil {
+
+		s.logger.Error(ctx, "[Refresh] audit publish failed", err, map[string]any{
+			"user_id": sessionData.UserID,
+
+			"session_id": sessionData.ID,
+		})
+	}
 
 	return &Result{
 
