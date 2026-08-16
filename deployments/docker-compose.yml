@@ -114,6 +114,13 @@ services:
       RESEND_VERIFICATION_IP_LIMIT: 3
       RESEND_VERIFICATION_IP_WINDOW: 10m
       IDEMPOTENCY_KEY_TTL: 10m
+      OAUTH_STATE_TTL: 10m
+      # No real Google OAuth app registered for local/CI — /start and
+      # /callback are still reachable, they just can't complete a real
+      # exchange against Google. See docs/oauth.md.
+      GOOGLE_OAUTH_CLIENT_ID: ""
+      GOOGLE_OAUTH_CLIENT_SECRET: ""
+      GOOGLE_OAUTH_REDIRECT_URL: "http://localhost:9000/v1/auth/oauth/google/callback"
     healthcheck:
       # /ready, not /health: Compose has one healthcheck per container,
       # no separate liveness/readiness concept like Kubernetes, so it

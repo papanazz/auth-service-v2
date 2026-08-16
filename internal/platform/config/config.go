@@ -18,6 +18,7 @@ type Config struct {
 	Security          SecurityConfig
 	Idempotency       IdempotencyConfig
 	EmailVerification EmailVerificationConfig
+	OAuth             OAuthConfig
 	Observability     ObservabilityConfig
 }
 
@@ -163,6 +164,26 @@ type ResendVerificationConfig struct {
 	Window time.Duration `env:"RESEND_VERIFICATION_IP_WINDOW" envDefault:"10m"`
 }
 
+// OAuthConfig holds settings for OAuth client login (docs/oauth.md).
+// Google is the only provider wired up today, so it's the only nested
+// config — a second provider would add a sibling, not change this
+// shape.
+type OAuthConfig struct {
+	// StateTTL bounds how long the state issued by oauthstart stays
+	// redeemable by oauthcallback — long enough to cover a real user
+	// completing the provider's consent screen, short enough that a
+	// leaked state can't be replayed long after the fact.
+	StateTTL time.Duration `env:"OAUTH_STATE_TTL" envDefault:"10m"`
+
+	Google GoogleOAuthConfig
+}
+
+type GoogleOAuthConfig struct {
+	ClientID     string `env:"GOOGLE_OAUTH_CLIENT_ID"`
+	ClientSecret string `env:"GOOGLE_OAUTH_CLIENT_SECRET"`
+	RedirectURL  string `env:"GOOGLE_OAUTH_REDIRECT_URL"`
+}
+
 type ObservabilityConfig struct {
 	OTLPExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"localhost:4317"`
 }
@@ -218,6 +239,10 @@ func (c *Config) Validate() error {
 
 	if c.EmailVerification.TokenTTL <= 0 {
 		return errors.New("EMAIL_VERIFICATION_TOKEN_TTL must be positive")
+	}
+
+	if c.OAuth.StateTTL <= 0 {
+		return errors.New("OAUTH_STATE_TTL must be positive")
 	}
 
 	// A refresh token is only honoured while its session is still active, so a

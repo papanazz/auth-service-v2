@@ -31,6 +31,8 @@ func testConfig() *config.Config {
 	cfg.EmailVerification.Resend.Limit = 3
 	cfg.EmailVerification.Resend.Window = 10 * time.Minute
 
+	cfg.OAuth.StateTTL = 10 * time.Minute
+
 	return cfg
 }
 
@@ -230,6 +232,64 @@ func TestNewSessionIssuerPolicy_CarriesConfiguredValues(t *testing.T) {
 
 	if policy.DeviceGracePeriod != cfg.Security.Login.Device.GracePeriod {
 		t.Errorf("device grace period = %v, want %v", policy.DeviceGracePeriod, cfg.Security.Login.Device.GracePeriod)
+	}
+}
+
+func TestNewOAuthStartPolicy_WiresEveryField(t *testing.T) {
+
+	policy := newOAuthStartPolicy(testConfig())
+
+	if missing := zeroFields(
+		reflect.ValueOf(policy),
+		"",
+	); len(missing) > 0 {
+
+		t.Errorf(
+			"SecurityPolicy fields left unwired by newOAuthStartPolicy: %v",
+			missing,
+		)
+	}
+}
+
+func TestNewOAuthStartPolicy_CarriesConfiguredValues(t *testing.T) {
+
+	cfg := testConfig()
+
+	policy := newOAuthStartPolicy(cfg)
+
+	if policy.StateTTL != cfg.OAuth.StateTTL {
+		t.Errorf("state TTL = %v, want %v", policy.StateTTL, cfg.OAuth.StateTTL)
+	}
+}
+
+func TestNewOAuthCallbackPolicy_WiresEveryField(t *testing.T) {
+
+	policy := newOAuthCallbackPolicy(testConfig())
+
+	if missing := zeroFields(
+		reflect.ValueOf(policy),
+		"",
+	); len(missing) > 0 {
+
+		t.Errorf(
+			"SecurityPolicy fields left unwired by newOAuthCallbackPolicy: %v",
+			missing,
+		)
+	}
+}
+
+func TestNewOAuthCallbackPolicy_CarriesConfiguredValues(t *testing.T) {
+
+	cfg := testConfig()
+
+	policy := newOAuthCallbackPolicy(cfg)
+
+	if policy.EmailVerificationTokenTTL != cfg.EmailVerification.TokenTTL {
+		t.Errorf(
+			"email verification token TTL = %v, want %v",
+			policy.EmailVerificationTokenTTL,
+			cfg.EmailVerification.TokenTTL,
+		)
 	}
 }
 

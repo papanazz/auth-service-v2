@@ -99,5 +99,17 @@ func NewRouter(
 		logoutHandler.Handle,
 	)
 
+	oauthHandler := handler.NewOAuthHandler(application.Logger, application.OAuthStartService, application.OAuthCallbackService)
+
+	r.Get(
+		"/v1/auth/oauth/{provider}/start",
+		oauthHandler.Start,
+	)
+
+	r.Get(
+		"/v1/auth/oauth/{provider}/callback",
+		oauthHandler.Callback,
+	)
+
 	return r
 }

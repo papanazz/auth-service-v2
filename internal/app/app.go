@@ -8,6 +8,8 @@ import (
 
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/logout"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/oauthcallback"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/oauthstart"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/refresh"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
@@ -20,6 +22,9 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/idempotency"
 	"github.com/papanazz/auth-service-v2/internal/platform/logger"
 	"github.com/papanazz/auth-service-v2/internal/platform/metrics"
+	oauthPlatform "github.com/papanazz/auth-service-v2/internal/platform/oauth"
+	"github.com/papanazz/auth-service-v2/internal/platform/oauth/google"
+	"github.com/papanazz/auth-service-v2/internal/platform/oauthstate"
 	"github.com/papanazz/auth-service-v2/internal/platform/token"
 	"github.com/papanazz/auth-service-v2/internal/platform/tracing"
 
@@ -33,6 +38,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/platform/postgres"
 	postgresRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository"
 	auditRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/audit"
+	oauthIdentityRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/oauthidentity"
 	refreshRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/refresh_token"
 	sessionRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/session"
 	userRepo "github.com/papanazz/auth-service-v2/internal/platform/postgres/repository/user"
@@ -61,6 +67,10 @@ type Application struct {
 	VerifyEmailService *verifyemail.Service
 
 	ResendVerificationService *resendverification.Service
+
+	OAuthStartService *oauthstart.Service
+
+	OAuthCallbackService *oauthcallback.Service
 
 	IdempotencyStore *idempotency.Store
 }
@@ -142,6 +152,21 @@ func New(
 			log,
 		)
 
+	googleExchanger :=
+		google.NewExchanger(
+			cfg.OAuth.Google.ClientID,
+			cfg.OAuth.Google.ClientSecret,
+			cfg.OAuth.Google.RedirectURL,
+		)
+
+	oauthStateStore :=
+		oauthstate.NewStore(
+			redisClient.Client,
+		)
+
+	oauthGenerator :=
+		oauthPlatform.NewRandomGenerator()
+
 		// =========================
 		// Repositories
 		// =========================
@@ -163,6 +188,11 @@ func New(
 
 	verificationTokenRepository :=
 		verificationRepo.NewVerificationRepository(
+			queries,
+		)
+
+	oauthIdentityRepository :=
+		oauthIdentityRepo.NewRepository(
 			queries,
 		)
 
@@ -191,6 +221,12 @@ func New(
 
 	resendVerificationPolicy :=
 		newResendVerificationSecurityPolicy(cfg)
+
+	oauthStartPolicy :=
+		newOAuthStartPolicy(cfg)
+
+	oauthCallbackPolicy :=
+		newOAuthCallbackPolicy(cfg)
 
 	attemptTracker :=
 		authattempt.NewRedisTracker(
@@ -312,6 +348,32 @@ func New(
 			resendVerificationPolicy,
 		)
 
+	oauthStartService :=
+		oauthstart.NewService(
+			googleExchanger,
+			oauthStateStore,
+			oauthGenerator,
+			oauthStartPolicy,
+		)
+
+	oauthCallbackService :=
+		oauthcallback.NewService(
+			googleExchanger,
+			oauthStateStore,
+			oauthIdentityRepository,
+			userRepository,
+			sessionIssuer,
+			transactionManager,
+			verificationTokenRepository,
+			verificationCache,
+			verificationGenerator,
+			verificationHasher,
+			emailPublisher,
+			auditPublisher,
+			log,
+			oauthCallbackPolicy,
+		)
+
 	return &Application{
 
 		Config: cfg,
@@ -335,6 +397,10 @@ func New(
 		VerifyEmailService: verifyEmailService,
 
 		ResendVerificationService: resendVerificationService,
+
+		OAuthStartService: oauthStartService,
+
+		OAuthCallbackService: oauthCallbackService,
 
 		IdempotencyStore: idempotencyStore,
 	}, nil

@@ -24,6 +24,8 @@ func validConfig() *Config {
 
 	cfg.EmailVerification.TokenTTL = 24 * time.Hour
 
+	cfg.OAuth.StateTTL = 10 * time.Minute
+
 	return cfg
 }
 
@@ -147,6 +149,15 @@ func TestConfig_Validate(t *testing.T) {
 			},
 
 			wantErr: "EMAIL_VERIFICATION_TOKEN_TTL must be positive",
+		},
+		{
+			name: "rejects a non-positive oauth state TTL",
+
+			mutate: func(c *Config) {
+				c.OAuth.StateTTL = 0
+			},
+
+			wantErr: "OAUTH_STATE_TTL must be positive",
 		},
 	}
 

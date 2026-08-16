@@ -2,6 +2,8 @@ package app
 
 import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/oauthcallback"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/oauthstart"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 	"github.com/papanazz/auth-service-v2/internal/app/user/resendverification"
@@ -78,6 +80,32 @@ func newRegisterSecurityPolicy(
 
 			Window: cfg.Security.Register.IP.Window,
 		},
+
+		EmailVerificationTokenTTL: cfg.EmailVerification.TokenTTL,
+	}
+}
+
+// newOAuthStartPolicy translates configuration into oauthstart's
+// security policy. Kept apart from New for the same reason
+// newLoginSecurityPolicy is — see its comment.
+func newOAuthStartPolicy(
+	cfg *config.Config,
+) oauthstart.SecurityPolicy {
+
+	return oauthstart.SecurityPolicy{
+
+		StateTTL: cfg.OAuth.StateTTL,
+	}
+}
+
+// newOAuthCallbackPolicy translates configuration into oauthcallback's
+// security policy. Kept apart from New for the same reason
+// newLoginSecurityPolicy is — see its comment.
+func newOAuthCallbackPolicy(
+	cfg *config.Config,
+) oauthcallback.SecurityPolicy {
+
+	return oauthcallback.SecurityPolicy{
 
 		EmailVerificationTokenTTL: cfg.EmailVerification.TokenTTL,
 	}
