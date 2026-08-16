@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/papanazz/auth-service-v2/internal/app/transaction"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/platform/authattempt"
 	"github.com/papanazz/auth-service-v2/internal/platform/errs"
 
@@ -15,9 +14,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/domain/auth"
 	"github.com/papanazz/auth-service-v2/internal/domain/logging"
 	"github.com/papanazz/auth-service-v2/internal/domain/password"
-	"github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 	"github.com/papanazz/auth-service-v2/internal/domain/session"
-	"github.com/papanazz/auth-service-v2/internal/domain/token"
 	"github.com/papanazz/auth-service-v2/internal/domain/user"
 )
 
@@ -46,21 +43,11 @@ type Result struct {
 }
 
 type LoginService struct {
-	transaction transaction.Manager
-
 	users user.Repository
-
-	sessions session.Repository
-
-	refreshTokens refresh_token.Repository
 
 	passwords password.Verifier
 
-	accessTokens token.AccessTokenService
-
-	refreshGenerator refresh_token.Generator
-
-	refreshHasher refresh_token.Hasher
+	issuer *sessionissuer.Issuer
 
 	audit audit.Publisher
 
@@ -72,14 +59,9 @@ type LoginService struct {
 }
 
 func NewService(
-	transaction transaction.Manager,
 	users user.Repository,
-	sessions session.Repository,
-	refreshTokens refresh_token.Repository,
 	passwords password.Verifier,
-	accessTokens token.AccessTokenService,
-	refreshGenerator refresh_token.Generator,
-	refreshHasher refresh_token.Hasher,
+	issuer *sessionissuer.Issuer,
 	audit audit.Publisher,
 	attemptTracker auth.AttemptTracker,
 	logger logging.Logger,
@@ -88,21 +70,11 @@ func NewService(
 
 	return &LoginService{
 
-		transaction: transaction,
-
 		users: users,
-
-		sessions: sessions,
-
-		refreshTokens: refreshTokens,
 
 		passwords: passwords,
 
-		accessTokens: accessTokens,
-
-		refreshGenerator: refreshGenerator,
-
-		refreshHasher: refreshHasher,
+		issuer: issuer,
 
 		audit: audit,
 
@@ -355,190 +327,24 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 6. Authentication success
+	// 6. Issue the session, refresh token, and access token
+	//
+	// Delegated to sessionissuer.Issuer — the exact transactional logic
+	// (device-slot locking, supersede-within-grace-period, session +
+	// refresh token creation) that used to live inline here, extracted
+	// so oauthcallback can mint sessions the identical way instead of
+	// reimplementing it. See docs/oauth.md.
 	//
 
-	sessionID :=
-		uuid.New()
-
-	familyID :=
-		uuid.New()
-
-	//
-	// Generate refresh token
-	//
-
-	rawRefreshToken, err :=
-		s.refreshGenerator.Generate()
-
-	if err != nil {
-
-		return nil, err
-	}
-
-	//
-	// Generate access token
-	//
-	// No database dependency
-	//
-
-	accessToken, err :=
-		s.accessTokens.Generate(
-			token.Claims{
-
-				UserID: account.ID,
-
-				SessionID: sessionID,
-			},
-		)
-
-	if err != nil {
-
-		return nil, err
-	}
-
-	//
-	// 7. Persist authentication state
-	//
-
-	err =
-		s.transaction.WithinTransaction(
+	issued, err :=
+		s.issuer.IssueForDevice(
 			ctx,
-			func(tx pgx.Tx) error {
-
-				now := time.Now().UTC()
-
-				txSessionRepo :=
-					s.sessions.WithTx(
-						tx,
-					)
-
-				//
-				// A device may hold at most one active session
-				// (uq_sessions_active_device). The lock below serializes
-				// concurrent logins for this device so the read that follows
-				// cannot go stale before this transaction acts on it — without
-				// it, two concurrent retries could both see the same existing
-				// session as supersede-able and race each other into the
-				// unique constraint.
-				//
-				// A second login for the same device within the grace period
-				// is treated as the same client retrying — e.g. after a
-				// network timeout that lost the first response — so the
-				// stale session is superseded rather than left to collide
-				// with the new one. Past the grace period the existing
-				// session is left alone and the login is rejected: silently
-				// killing a session that has been active for a while looks
-				// more like a bug or an attacker than a retry.
-				//
-
-				if err :=
-					txSessionRepo.LockDeviceSlot(
-						ctx,
-						account.ID,
-						cmd.DeviceID,
-					); err != nil {
-
-					return err
-				}
-
-				existingSession, err :=
-					txSessionRepo.FindActiveByUserAndDevice(
-						ctx,
-						account.ID,
-						cmd.DeviceID,
-					)
-
-				if err != nil && !errors.Is(err, errs.ErrSessionNotFound) {
-
-					return err
-				}
-
-				if existingSession != nil {
-
-					if time.Since(existingSession.CreatedAt) > s.policy.DeviceGracePeriod {
-
-						return errs.ErrDeviceSessionActive
-					}
-
-					if err :=
-						txSessionRepo.Revoke(
-							ctx,
-							existingSession.ID,
-							session.RevokeSessionSuperseded,
-						); err != nil {
-
-						return err
-					}
-				}
-
-				err =
-					txSessionRepo.Create(
-						ctx,
-						session.Session{
-
-							ID: sessionID,
-
-							UserID: account.ID,
-
-							DeviceID: cmd.DeviceID,
-
-							DeviceName: cmd.DeviceName,
-
-							DeviceType: cmd.DeviceType,
-
-							IPAddress: cmd.IPAddress,
-
-							UserAgent: cmd.UserAgent,
-
-							LastUsedAt: &now,
-
-							ExpiresAt: now.
-								Add(
-									s.policy.SessionTTL,
-								).
-								UTC(),
-
-							CreatedAt: now.UTC(),
-						},
-					)
-
-				if err != nil {
-
-					return err
-				}
-
-				txRefreshRepo :=
-					s.refreshTokens.WithTx(
-						tx,
-					)
-
-				return txRefreshRepo.Create(
-					ctx,
-					refresh_token.Token{
-
-						ID: uuid.New(),
-
-						SessionID: sessionID,
-
-						FamilyID: familyID,
-
-						ParentTokenID: nil,
-
-						Hash: s.refreshHasher.Hash(
-							rawRefreshToken,
-						),
-
-						ExpiresAt: time.Now().
-							Add(
-								s.policy.RefreshTokenTTL,
-							).
-							UTC(),
-
-						CreatedAt: time.Now().UTC(),
-					},
-				)
-			},
+			account.ID,
+			cmd.DeviceID,
+			cmd.DeviceName,
+			cmd.DeviceType,
+			cmd.IPAddress,
+			cmd.UserAgent,
 		)
 
 	if err != nil {
@@ -567,7 +373,7 @@ func (s *LoginService) Handle(
 	}
 
 	//
-	// 8. Publish audit event and record the last login timestamp
+	// 7. Publish audit event and record the last login timestamp
 	//
 	// Both best-effort, both after the transaction commits: neither is
 	// critical enough to fail a login that already succeeded, and
@@ -580,7 +386,7 @@ func (s *LoginService) Handle(
 			ctx,
 			loginSuccessEvent(
 				account.ID,
-				sessionID,
+				issued.SessionID,
 				cmd.IPAddress,
 				cmd.UserAgent,
 			),
@@ -589,7 +395,7 @@ func (s *LoginService) Handle(
 		s.logger.Error(ctx, "[Login] audit publish failed", err, map[string]any{
 			"user_id": account.ID,
 
-			"session_id": sessionID,
+			"session_id": issued.SessionID,
 		})
 	}
 
@@ -606,15 +412,11 @@ func (s *LoginService) Handle(
 
 	return &Result{
 
-		AccessToken: accessToken.Token,
+		AccessToken: issued.AccessToken,
 
-		RefreshToken: rawRefreshToken,
+		RefreshToken: issued.RefreshToken,
 
-		ExpiresIn: int64(
-			time.Until(
-				accessToken.ExpiresAt,
-			).Seconds(),
-		),
+		ExpiresIn: issued.ExpiresIn,
 	}, nil
 }
 

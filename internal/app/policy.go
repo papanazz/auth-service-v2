@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 	"github.com/papanazz/auth-service-v2/internal/app/user/resendverification"
 	"github.com/papanazz/auth-service-v2/internal/domain/security"
@@ -39,6 +40,18 @@ func newLoginSecurityPolicy(
 
 			Window: cfg.Security.Login.Email.Window,
 		},
+	}
+}
+
+// newSessionIssuerPolicy translates configuration into sessionissuer's
+// policy — the TTLs and grace period shared by every way of minting a
+// session (password login and OAuth login alike). Kept apart from New
+// for the same reason newLoginSecurityPolicy is — see its comment.
+func newSessionIssuerPolicy(
+	cfg *config.Config,
+) sessionissuer.Policy {
+
+	return sessionissuer.Policy{
 
 		RefreshTokenTTL: cfg.Security.RefreshToken.TTL,
 

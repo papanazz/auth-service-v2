@@ -9,6 +9,7 @@ import (
 	"github.com/papanazz/auth-service-v2/internal/app/auth/login"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/logout"
 	"github.com/papanazz/auth-service-v2/internal/app/auth/refresh"
+	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/app/user/register"
 	"github.com/papanazz/auth-service-v2/internal/app/user/resendverification"
 	"github.com/papanazz/auth-service-v2/internal/app/user/verifyemail"
@@ -182,6 +183,9 @@ func New(
 	loginPolicy :=
 		newLoginSecurityPolicy(cfg)
 
+	sessionIssuerPolicy :=
+		newSessionIssuerPolicy(cfg)
+
 	registerPolicy :=
 		newRegisterSecurityPolicy(cfg)
 
@@ -197,6 +201,21 @@ func New(
 	idempotencyStore :=
 		idempotency.NewStore(
 			redisClient.Client,
+		)
+
+	// sessionIssuer mints a session + refresh token + access token for
+	// one account on one device — shared by login and OAuth login alike
+	// (docs/oauth.md), rather than each having its own copy of the
+	// device-slot/transaction logic.
+	sessionIssuer :=
+		sessionissuer.NewIssuer(
+			transactionManager,
+			sessionRepository,
+			refreshTokenRepository,
+			jwtService,
+			refreshGenerator,
+			refreshHasher,
+			sessionIssuerPolicy,
 		)
 
 	// =========================
@@ -222,14 +241,9 @@ func New(
 
 	loginService :=
 		login.NewService(
-			transactionManager,
 			userRepository,
-			sessionRepository,
-			refreshTokenRepository,
 			passwordHasher,
-			jwtService,
-			refreshGenerator,
-			refreshHasher,
+			sessionIssuer,
 			auditPublisher,
 			attemptTracker,
 			log,

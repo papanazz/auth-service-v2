@@ -111,9 +111,6 @@ func TestNewLoginSecurityPolicy_CarriesConfiguredValues(t *testing.T) {
 		{"IP window", policy.IP.Window, cfg.Security.Login.IP.Window},
 		{"credential limit", policy.Credential.Limit, cfg.Security.Login.Email.Limit},
 		{"credential window", policy.Credential.Window, cfg.Security.Login.Email.Window},
-		{"refresh token TTL", policy.RefreshTokenTTL, cfg.Security.RefreshToken.TTL},
-		{"session TTL", policy.SessionTTL, cfg.Security.Session.TTL},
-		{"device grace period", policy.DeviceGracePeriod, cfg.Security.Login.Device.GracePeriod},
 	}
 
 	for _, tt := range tests {
@@ -201,11 +198,46 @@ func TestNewResendVerificationSecurityPolicy_CarriesConfiguredValues(t *testing.
 	}
 }
 
+func TestNewSessionIssuerPolicy_WiresEveryField(t *testing.T) {
+
+	policy := newSessionIssuerPolicy(testConfig())
+
+	if missing := zeroFields(
+		reflect.ValueOf(policy),
+		"",
+	); len(missing) > 0 {
+
+		t.Errorf(
+			"Policy fields left unwired by newSessionIssuerPolicy: %v",
+			missing,
+		)
+	}
+}
+
+func TestNewSessionIssuerPolicy_CarriesConfiguredValues(t *testing.T) {
+
+	cfg := testConfig()
+
+	policy := newSessionIssuerPolicy(cfg)
+
+	if policy.RefreshTokenTTL != cfg.Security.RefreshToken.TTL {
+		t.Errorf("refresh token TTL = %v, want %v", policy.RefreshTokenTTL, cfg.Security.RefreshToken.TTL)
+	}
+
+	if policy.SessionTTL != cfg.Security.Session.TTL {
+		t.Errorf("session TTL = %v, want %v", policy.SessionTTL, cfg.Security.Session.TTL)
+	}
+
+	if policy.DeviceGracePeriod != cfg.Security.Login.Device.GracePeriod {
+		t.Errorf("device grace period = %v, want %v", policy.DeviceGracePeriod, cfg.Security.Login.Device.GracePeriod)
+	}
+}
+
 // A refresh token is only accepted while its session is still active, so a
 // session that expires first would reject tokens that have not expired yet.
-func TestNewLoginSecurityPolicy_SessionOutlivesRefreshToken(t *testing.T) {
+func TestNewSessionIssuerPolicy_SessionOutlivesRefreshToken(t *testing.T) {
 
-	policy := newLoginSecurityPolicy(testConfig())
+	policy := newSessionIssuerPolicy(testConfig())
 
 	if policy.SessionTTL < policy.RefreshTokenTTL {
 		t.Errorf(
@@ -231,7 +263,7 @@ func TestShippedDefaults_SessionOutlivesRefreshToken(t *testing.T) {
 		t.Fatalf("loading defaults: %v", err)
 	}
 
-	policy := newLoginSecurityPolicy(cfg)
+	policy := newSessionIssuerPolicy(cfg)
 
 	if policy.RefreshTokenTTL <= 0 {
 		t.Error("default REFRESH_TOKEN_TTL is not positive")

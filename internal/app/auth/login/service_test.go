@@ -183,7 +183,7 @@ func TestLoginService_Handle_SessionCarriesExpiry(t *testing.T) {
 
 	// It must also outlive the refresh token, otherwise a valid refresh token
 	// can be presented against an already-expired session.
-	wantAtLeast := before.Add(h.policy.RefreshTokenTTL)
+	wantAtLeast := before.Add(h.sessionIssuerPolicy.RefreshTokenTTL)
 
 	if created.ExpiresAt.Before(wantAtLeast) {
 		t.Errorf(

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/papanazz/auth-service-v2/internal/app/auth/sessionissuer"
 	"github.com/papanazz/auth-service-v2/internal/domain/audit"
 	domainRefresh "github.com/papanazz/auth-service-v2/internal/domain/refresh_token"
 	"github.com/papanazz/auth-service-v2/internal/domain/security"
@@ -620,6 +621,15 @@ type harness struct {
 	logger *mockLogger
 
 	policy SecurityPolicy
+
+	// sessionIssuerPolicy carries what used to be part of SecurityPolicy
+	// (RefreshTokenTTL, SessionTTL, DeviceGracePeriod) before
+	// sessionissuer.Issuer was extracted — see docs/oauth.md. service()
+	// builds a real Issuer from this harness's own mocks, so every
+	// existing assertion against h.sessions/h.refreshTokens/h.transaction
+	// still observes the identical transactional behavior, just reached
+	// through the Issuer instead of inline login code.
+	sessionIssuerPolicy sessionissuer.Policy
 }
 
 func newHarness() *harness {
@@ -657,6 +667,9 @@ func newHarness() *harness {
 				Limit:  5,
 				Window: 15 * time.Minute,
 			},
+		},
+
+		sessionIssuerPolicy: sessionissuer.Policy{
 
 			RefreshTokenTTL: 30 * 24 * time.Hour,
 
@@ -669,15 +682,21 @@ func newHarness() *harness {
 
 func (h *harness) service() *LoginService {
 
+	issuer :=
+		sessionissuer.NewIssuer(
+			h.transaction,
+			h.sessions,
+			h.refreshTokens,
+			h.accessTokens,
+			h.generator,
+			mockRefreshHasher{},
+			h.sessionIssuerPolicy,
+		)
+
 	return NewService(
-		h.transaction,
 		h.users,
-		h.sessions,
-		h.refreshTokens,
 		h.passwords,
-		h.accessTokens,
-		h.generator,
-		mockRefreshHasher{},
+		issuer,
 		h.audit,
 		h.tracker,
 		h.logger,
