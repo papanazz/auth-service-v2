@@ -31,7 +31,11 @@ persisted hashed). Requires an `Idempotency-Key` header (see Idempotency).
    `ErrInvalidCredentials`, so an unregistered email takes the same time
    as a wrong password.
 
-4. **Verify password.** Argon2id constant-time comparison. On failure:
+4. **Verify password.** An OAuth-only account (`docs/oauth.md`) has
+   `PasswordHash == nil` — that guard runs first and takes the same
+   dummy-Argon2-verification path as an unknown account, so "this
+   account has no password" is never distinguishable from a wrong
+   password. Otherwise: Argon2id constant-time comparison. On failure:
    `RecordFailure` against the credential rate limiter, audit
    `LOGIN_FAILED`, return `ErrInvalidCredentials`. On success: reset the
    credential limiter immediately (a legitimate login should not carry
@@ -44,12 +48,11 @@ persisted hashed). Requires an `Idempotency-Key` header (see Idempotency).
    against the credential rate limiter (the password was correct — see
    Decisions) but is audited as `LOGIN_FAILED`.
 
-6. **Authentication success.** Mint `sessionID`/`familyID`, generate the
-   raw refresh token (`platform/refresh_token.Generator`) and the access
-   token JWT (claims: `sub`=UserID, `sid`=SessionID). Neither depends on
-   the database.
-
-7. **Persist authentication state — single transaction.**
+6. **Issue the session, refresh token, and access token** —
+   `sessionissuer.Issuer.IssueForDevice`, not inline here. Mints
+   `sessionID`/`familyID`, generates the raw refresh token
+   (`platform/refresh_token.Generator`) and the access token JWT
+   (claims: `sub`=UserID, `sid`=SessionID), then in one transaction:
    1. `LockDeviceSlot(userID, deviceID)` — Postgres transaction-scoped
       advisory lock (`pg_advisory_xact_lock`), so concurrent logins for
       the same device serialize instead of racing.
@@ -62,10 +65,17 @@ persisted hashed). Requires an `Idempotency-Key` header (see Idempotency).
    4. Create the new session, create the refresh token row (family root:
       `ParentTokenID` nil).
 
-8. **Publish audit event and record `last_login_at`.** `LOGIN_SUCCESS`
+   This used to live inline in `login.Service` (flow steps 6-7 before
+   the extraction); it now lives in `app/auth/sessionissuer` so OAuth
+   login (`docs/oauth.md`) mints sessions through the identical code
+   path instead of a second copy of this logic. `login.Service` and
+   `oauthcallback.Service` share one `*sessionissuer.Issuer` instance,
+   wired once in `app.go`.
+
+7. **Publish audit event and record `last_login_at`.** `LOGIN_SUCCESS`
    with userID/sessionID/IP/UA, then `UpdateLastLoginAt(account.ID)` —
    both after the transaction commits, both best-effort. A
-   device-conflict rejection (step 7.3, older branch) is separately
+   device-conflict rejection (step 6.3, older branch) is separately
    audited as `LOGIN_FAILED` after the transaction returns, since
    `account.ID` isn't resolved to a session at that point.
 
@@ -110,7 +120,7 @@ Idempotency-Key mechanism above is the actually-correct fix for the
 retry case specifically, with the grace period remaining as the fallback
 for clients that don't send a key.
 
-The decide-then-act sequence (flow step 7) is serialized per `(user,
+The decide-then-act sequence (flow step 6) is serialized per `(user,
 device)` by `LockDeviceSlot`, a Postgres advisory lock, so concurrent
 logins for the same device can't race each other into the unique
 constraint. `RevokeSession`'s `revoked_at` uses `clock_timestamp()`
@@ -169,6 +179,13 @@ for one device, zero errors, exactly one active session.
 - **`CanLogin()`'s `LockedUntil` branch is presently unreachable from
   real data** — see Gaps.
 
+- **`PasswordHash` is nullable, and login checks it before dereferencing.**
+  An OAuth-only account (`docs/oauth.md`) never has a password hash.
+  Rather than a nil check that returns a different error, the guard
+  runs the identical dummy-Argon2-verification path an unknown account
+  takes — the same enumeration-safety reasoning as step 3, extended to
+  cover "this account exists but can't authenticate this way."
+
 - **`last_login_at` is written outside the login transaction, best-effort.**
   `queries/user.sql`'s own comment on `UpdateLastLoginAt` says it doesn't
   belong inside the transaction that creates the session/refresh-token
@@ -214,7 +231,7 @@ for one device, zero errors, exactly one active session.
   `Reason`), also exported as `auth_events_total{type,success}` — see
   `docs/metrics.md` for why `Reason` deliberately isn't a metric label.
 - Idempotent retries via `Idempotency-Key` (see Idempotency above).
-- `last_login_at` is updated on every successful login (flow step 8),
+- `last_login_at` is updated on every successful login (flow step 7),
   best-effort and after the transaction commits — see Decisions.
 
 ## Gaps
@@ -366,8 +383,11 @@ internal/app/auth/login/service.go         use case
 internal/app/auth/login/validator.go        input validation
 internal/app/auth/login/policy.go           SecurityPolicy shape
 internal/app/auth/login/event.go            LOGIN_SUCCESS / LOGIN_FAILED
+internal/app/auth/sessionissuer/issuer.go   shared session-minting logic,
+                                             also used by OAuth login (docs/oauth.md)
 internal/app/policy.go                      config -> SecurityPolicy
-internal/domain/user/user.go                CanLogin, status lifecycle
+internal/domain/user/user.go                CanLogin, status lifecycle,
+                                             PasswordHash *string
 internal/domain/user/email.go               NormalizeEmail, canonicalization rules
 internal/domain/session/session.go          DeviceType.Valid(), RevokeReason
 internal/domain/session/repository.go       LockDeviceSlot, FindActiveByUserAndDevice

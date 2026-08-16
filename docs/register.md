@@ -107,6 +107,16 @@ login are separate steps; this endpoint returns no tokens.
   `handler/auth.go` uses — so the audit event and the rate limiter both
   see the same client context login's do.
 
+- **This is not the only way an account gets created.**
+  `oauthcallback.Service` (`docs/oauth.md`) auto-registers an account
+  when an OAuth identity's email matches nothing on file — same `Status
+  ACTIVE` override, same "informational, not enforced" verification
+  stance, but deliberately its own code path rather than a call into
+  this service: the two diverge enough (no password to hash, an
+  `oauth_identities` row created in the same transaction, verification
+  only conditionally needed) that sharing would mean threading OAuth
+  concerns through a service that has none today.
+
 ## Capabilities
 
 - Case/whitespace-insensitive email normalization, plus provider-specific

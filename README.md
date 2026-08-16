@@ -17,6 +17,8 @@ Decisions / Gaps / Tested Scenarios reference, including what's
 | POST | `/v1/user/verify-email` | [`docs/email-verification.md`](docs/email-verification.md) |
 | POST | `/v1/user/verify-email/resend` | [`docs/email-verification.md`](docs/email-verification.md) |
 | POST | `/v1/auth/login` | [`docs/login.md`](docs/login.md) |
+| GET | `/v1/auth/oauth/{provider}/start` | [`docs/oauth.md`](docs/oauth.md) |
+| GET | `/v1/auth/oauth/{provider}/callback` | [`docs/oauth.md`](docs/oauth.md) |
 | POST | `/v1/auth/refresh` | [`docs/refresh.md`](docs/refresh.md) |
 | POST | `/v1/auth/logout` | [`docs/logout.md`](docs/logout.md) |
 | GET | `/health` | [`docs/health.md`](docs/health.md) |
@@ -166,10 +168,11 @@ OpenTelemetry · Prometheus · Grafana · Jaeger
   transport-agnostic, so this is additive: `internal/transport/grpc`
   alongside the existing HTTP handlers, no changes below the transport
   layer.
-- **OAuth client ("Sign in with Google").** Architecture and the
-  account-linking security policy are decided — see
-  [`docs/adr/0001-oauth-client-and-account-linking.md`](docs/adr/0001-oauth-client-and-account-linking.md)
-  — implementation not started yet.
+- **A second OAuth provider.** The client/provider split
+  (`domain/oauth.Exchanger`) was built for more than one provider from
+  the start — see [`docs/oauth.md`](docs/oauth.md) Gaps — but only
+  Google is wired up, since there's no second provider yet to design
+  the dispatch around.
 
 Each endpoint doc's own **Gaps** section tracks smaller, more specific
 follow-ups (e.g. no Grafana dashboards ship yet, failure-path audit
