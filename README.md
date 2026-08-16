@@ -166,11 +166,16 @@ OpenTelemetry · Prometheus · Grafana · Jaeger
   transport-agnostic, so this is additive: `internal/transport/grpc`
   alongside the existing HTTP handlers, no changes below the transport
   layer.
+- **OAuth client ("Sign in with Google").** Architecture and the
+  account-linking security policy are decided — see
+  [`docs/adr/0001-oauth-client-and-account-linking.md`](docs/adr/0001-oauth-client-and-account-linking.md)
+  — implementation not started yet.
 
 Each endpoint doc's own **Gaps** section tracks smaller, more specific
 follow-ups (e.g. no Grafana dashboards ship yet, failure-path audit
 events are incomplete for a couple of endpoints) — deliberately not
-duplicated here.
+duplicated here. Decisions that span multiple endpoints or predate any
+single one live in [`docs/adr/`](docs/adr/) instead.
 
 ## License
 
