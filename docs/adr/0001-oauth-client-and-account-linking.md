@@ -25,8 +25,8 @@ The two things that make this more than a mechanical integration:
 `users.password_hash` is currently `NOT NULL` (`migrations/000003_create_users.up.sql`),
 which an OAuth-only account (no password ever set) can't satisfy — and
 an OAuth identity's email can collide with an *existing* password
-account's email, which is the classic OAuth account-takeover vector if
-handled carelessly.
+account's email, which needs a deliberate policy, not an accident of
+whatever the code happens to do first.
 
 ## Decision
 
@@ -57,15 +57,14 @@ for this feature.
   dereference, and not reveal "this account has no password" (the same
   enumeration-safety stance `docs/login.md` already documents for
   unknown accounts).
-- **New use cases**: `app/auth/oauthstart` builds the authorization URL
-  — generates `state` and a PKCE `code_verifier`, stores
-  `{state -> code_verifier}` in Redis with a short TTL, single-use
-  (mirrors the existing idempotency store's claim pattern, see
-  `docs/login.md` Idempotency). `app/auth/oauthcallback` validates and
-  consumes `state`, exchanges the code, then does exactly one of: log in
-  an already-linked user, register a brand-new account (no email
-  collision), or link the identity to the current authenticated user
-  (see Account-Linking Policy below).
+- **One use case, `app/auth/oauthcallback`**, not two. There's no
+  separate authenticated "link a provider" flow (considered and
+  deliberately dropped — see Consequences): every OAuth sign-in is
+  anonymous and goes through the same decision in Account-Linking Policy
+  below. `app/auth/oauthstart` builds the authorization URL — generates
+  `state` and a PKCE `code_verifier`, stores `{state -> code_verifier}`
+  in Redis with a short TTL, single-use (mirrors the existing
+  idempotency store's claim pattern, see `docs/login.md` Idempotency).
 - **Session issuance is not reimplemented.** The transactional "create a
   session + refresh token for this account+device" step currently lives
   inside `login.Service.Handle` (`internal/app/auth/login/service.go`
@@ -73,68 +72,80 @@ for this feature.
   and `oauthcallback` call, so there is exactly one implementation of
   session minting — two auth methods with independently-evolving session
   logic is how they drift apart in security posture.
-- **Transport**: `GET /v1/auth/oauth/{provider}/start` (anonymous —
-  login/register intent) and `GET /v1/user/oauth/{provider}/link/start`
-  (requires an authenticated session — link intent) both funnel into one
-  `GET /v1/auth/oauth/{provider}/callback`. The handler branches on
-  whether the `state` record it consumed carries a `user_id` — that's
-  what distinguishes "this callback is a link" from "this callback is a
-  login/register," not a separate callback path per intent.
+- **Transport**: `GET /v1/auth/oauth/{provider}/start` and
+  `GET /v1/auth/oauth/{provider}/callback`. Both anonymous — no
+  authenticated variant.
 
 ### Account-linking policy
 
-**A first-time OAuth identity is linked to an account only from an
-authenticated session that the user themselves initiated** — by visiting
-`/v1/user/oauth/{provider}/link/start` while already logged in. It is
-**never** linked automatically at anonymous first sign-in, even when the
-provider's email matches an existing account and the provider asserts
-`email_verified: true`.
+Three cases, evaluated in this order once the code has been exchanged
+for an `Identity`:
 
-If an anonymous OAuth callback's email collides with an existing,
-not-yet-linked account, the service returns `errs.ErrUserAlreadyExists`
-(`409`, `"user already exists"`) — the identical error register already
-returns for a duplicate-email registration attempt (`docs/register.md`),
-deliberately reused rather than minting an OAuth-specific code. The
-client-visible outcome is the same shape as an existing, well-understood
-failure mode; no new error taxonomy for this feature.
-
-When there's **no** email collision, a new account is created following
-the same conventions `register.Service` already establishes:
-`Status = ACTIVE` immediately (`docs/register.md` Decisions), and
-`email_verified_at` set immediately *only if* the provider asserted the
-email verified — otherwise the account falls through to the existing
-email-verification flow untouched (`docs/email-verification.md`), with
-no OAuth-specific verification path invented.
+1. **`oauth_identities` already has a row for `(provider, provider_user_id)`.**
+   Returning user — log in as the linked account. (Ordinary case,
+   unaffected by anything below.)
+2. **No existing link, and no `users` row has `Identity.Email`.**
+   No collision — auto-register a new account, same conventions
+   `register.Service` already establishes: `Status = ACTIVE`
+   immediately (`docs/register.md` Decisions), `email_verified_at` set
+   immediately if-and-only-if `Identity.EmailVerified` is true —
+   otherwise the account falls through to the existing
+   email-verification flow untouched (`docs/email-verification.md`).
+   Create the `oauth_identities` row, log in.
+3. **No existing link, but a `users` row already has `Identity.Email`.**
+   This is the collision case, and it splits in two:
+   - **Both sides verified** — `Identity.EmailVerified` is true *and*
+     the existing account's `email_verified_at` is already set — **auto-link**:
+     create the `oauth_identities` row against that account, log in.
+     Requiring *both* signals, not just one, is the load-bearing part of
+     this policy — see Consequences for why.
+   - **Either side is not verified** — reject with
+     `errs.ErrUserAlreadyExists` (`409`, `"user already exists"`), the
+     identical error register already returns for a duplicate-email
+     registration attempt. No new error taxonomy for this feature. There
+     is no third option here: `users.email` is unique, so a second
+     account under the same address was never on the table.
 
 ## Consequences
 
 **Positive:**
 
-- Closes the classic OAuth account-takeover vector entirely — auto-linking
-  on email match is exactly how an attacker who can get *any* email
-  verified by an IdP (their own Google Workspace domain, a compromised
-  mailbox, or simply the provider's own weaker verification bar) takes
-  over a same-email account created a different way. Requiring an
-  authenticated session to link removes that path structurally, not by
-  policy that could be gotten wrong at one call site and not another.
+- A legitimate returning user whose Google email matches their existing,
+  already-verified account gets a one-step, no-friction sign-in — the
+  auto-link case is the common path, not the exception, which is what
+  makes "Sign in with Google" actually convenient instead of a second
+  registration wearing a different hat.
 - Zero duplicated security logic: session minting, the `ACTIVE` status
   convention, and the email-verification flow are all reused as-is
   rather than re-implemented for the OAuth path.
-- The collision error is something a client already knows how to render
-  — it's register's existing `409 USER_ALREADY_EXISTS`, not a new case
-  to handle.
+- One use case, one transport flow, no authenticated/anonymous branch to
+  keep in sync — considered and dropped (see below), which is real
+  scope removed, not scope deferred.
 
 **Negative / accepted trade-offs:**
 
-- Worse first-time UX for a legitimate user who already has a password
-  account under the same email: they see `"user already exists"` from
-  the OAuth attempt and have to log in with their original method, then
-  separately visit the link flow — no silent, one-click merge. This is
-  the deliberate cost of closing the takeover vector, not an oversight.
+- **Requiring the provider's `email_verified` claim, not just our own
+  `email_verified_at`, is load-bearing and easy to accidentally drop.**
+  Our own flag only proves *someone, once* controlled that mailbox
+  during registration; it says nothing about who's authenticating right
+  now. The provider's claim is what proves *today's* requester controls
+  it. Checking only our side would mean any OAuth provider that ever
+  asserts an unverified or spoofable email — a future addition, a
+  misconfiguration, not necessarily Google itself — could log in as any
+  existing verified account by claiming its address. Both checks stay
+  required; this is the one place in this ADR future changes need to
+  read carefully before "simplifying."
+- **No path exists to link a provider whose email doesn't match the
+  user's registered email**, or to link before the account is verified.
+  Considered building a separate authenticated `/link` flow for this and
+  deliberately cut for now — smaller initial surface, and the case is
+  self-resolving (verify the account, or sign in with matching email)
+  rather than blocked. Revisit as a separate ADR if real usage shows
+  this gap matters.
 - `users.password_hash` going nullable is a real schema change touching
   every existing read of that column (`docs/login.md` password
   verification, any future admin/support tooling) — worth flagging
   again at implementation time, not just here.
 - No account-unlinking flow is specified by this ADR — an account that
-  links a provider has no documented way to remove it. Deferred as a
-  smaller, separable follow-up once linking itself exists.
+  links a provider has no documented way to remove it. Deferred with
+  the same reasoning as the missing link flow above.
